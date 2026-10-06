@@ -192,19 +192,19 @@ fn Settings(
     };
     let draft: Draft = RwSignal::new(games.get_untracked().into_iter().map(fresh).collect());
 
-    let save = move |_| {
-        let list: Vec<Game> = draft.with_untracked(|v| v.iter().map(|(_, g)| g.get_untracked()).collect());
+    // ponytail: writes on every edit; debounce if images make this slow.
+    Effect::new(move |prev: Option<()>| {
+        let list: Vec<Game> = draft.with(|v| v.iter().map(|(_, g)| g.get()).collect());
+        if prev.is_none() {
+            return;
+        }
+        games.set(list.clone());
         spawn_local(async move {
-            let msg = match backend::save_games(&list).await {
-                Ok(()) => {
-                    games.set(list);
-                    ("Guardado.".to_string(), false)
-                }
-                Err(e) => (format!("No se pudo guardar: {e}"), true),
-            };
-            status.set(Some(msg));
+            if let Err(e) = backend::save_games(&list).await {
+                status.set(Some((format!("No se pudo guardar: {e}"), true)));
+            }
         });
-    };
+    });
 
     view! {
         <section class="settings">
@@ -214,7 +214,6 @@ fn Settings(
             </For>
             <div class="actions">
                 <button on:click=move |_| draft.update(|v| v.push(fresh(Game::default())))>"Agregar juego"</button>
-                <button class="primary" on:click=save>"Guardar"</button>
             </div>
 
             <h2>"Controlador"</h2>
