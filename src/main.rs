@@ -2,6 +2,7 @@ mod app;
 mod backend;
 mod hid_profile;
 mod nav;
+mod sound;
 
 use app::*;
 use leptos::prelude::*;
