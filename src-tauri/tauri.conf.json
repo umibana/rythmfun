@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "rythmfunlauncher",
+  "productName": "Rythm Fun Launcher",
   "version": "0.1.0",
   "identifier": "com.hans.rythmfunlauncher",
   "build": {
@@ -13,9 +13,10 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "rythmfunlauncher",
-        "width": 800,
-        "height": 600
+        "title": "Rythm Fun Launcher",
+        "width": 1280,
+        "height": 720,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required"
       }
     ],
     "security": {
