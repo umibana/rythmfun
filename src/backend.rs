@@ -49,13 +49,30 @@ pub async fn load_games() -> Result<Vec<Game>, String> {
         let v = call("load_games", NoArgs {}).await?;
         serde_wasm_bindgen::from_value(v).map_err(|e| e.to_string())
     } else {
-        Ok(storage()
-            .get_item(STORAGE_KEY)
-            .ok()
-            .flatten()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default())
+        Ok(match storage().get_item(STORAGE_KEY).ok().flatten() {
+            Some(s) => serde_json::from_str(&s).unwrap_or_default(),
+            None => demo_games(),
+        })
     }
+}
+
+/// Browser dev only: sample games shown until something is saved, so the UI has content.
+fn demo_games() -> Vec<Game> {
+    [
+        ("Taiko no Tatsujin", "taiko"),
+        ("osu!", "osu"),
+        ("Sound Voltex", "sdvx"),
+        ("Chunithm", "chunithm"),
+        ("maimai", "maimai"),
+        ("beatmania IIDX", "iidx"),
+    ]
+    .into_iter()
+    .map(|(name, id)| Game {
+        name: name.into(),
+        path: format!(r"C:\juegos\{id}.bat"),
+        image: format!("assets/demo/{id}.svg"),
+    })
+    .collect()
 }
 
 pub async fn save_games(games: &[Game]) -> Result<(), String> {

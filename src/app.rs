@@ -13,6 +13,7 @@ pub fn App() -> impl IntoView {
     let status = RwSignal::new(None::<(String, bool)>); // (message, is_error)
     let hid_name = RwSignal::new(None::<String>);
     let hid_raw = RwSignal::new(String::new());
+    let launching = RwSignal::new(None::<usize>);
     // Autosave stays off after a failed load so it cannot overwrite the real file.
     let loaded = RwSignal::new(false);
 
@@ -42,7 +43,10 @@ pub fn App() -> impl IntoView {
             Outcome::Back => sound::play("release", 0.0),
             Outcome::Launch(i) => {
                 sound::play("whoosh", pan);
-                let path = games.with_untracked(|g| g[i].path.clone());
+                launching.set(Some(i));
+                set_timeout(move || launching.set(None), Duration::from_millis(450));
+                let (name, path) = games.with_untracked(|g| (g[i].name.clone(), g[i].path.clone()));
+                status.set(Some((format!("Iniciando {name}…"), false)));
                 spawn_local(async move {
                     if let Err(e) = backend::launch(&path).await {
                         status.set(Some((format!("No se pudo lanzar: {e}"), true)));
@@ -84,10 +88,31 @@ pub fn App() -> impl IntoView {
         })}
         <main>
             {move || match tab.get() {
-                Tab::Home => view! { <Home games nav on_action/> }.into_any(),
+                Tab::Home => view! { <Home games nav on_action launching/> }.into_any(),
                 Tab::Settings => view! { <Settings games loaded status hid_name hid_raw connect_hid/> }.into_any(),
             }}
         </main>
+        <Hints nav hid_name/>
+    }
+}
+
+/// Bottom bar: what each input does right now.
+#[component]
+fn Hints(nav: RwSignal<Nav>, hid_name: RwSignal<Option<String>>) -> impl IntoView {
+    let hints = move || match nav.with(|n| (n.zone, n.tab)) {
+        (Zone::Bar, _) => vec![("← →", "Cambiar"), ("⏎", "Entrar")],
+        (Zone::Content, Tab::Home) => vec![("← →", "Elegir"), ("⏎", "Jugar"), ("⌫", "Menú")],
+        (Zone::Content, Tab::Settings) => vec![("⌫", "Menú")],
+    };
+    view! {
+        <footer class="hints">
+            <span class="device">{move || hid_name.get().unwrap_or_else(|| "Teclado o gamepad".into())}</span>
+            <span class="keys">
+                {move || hints().into_iter().map(|(k, label)| view! {
+                    <span class="hint"><kbd>{k}</kbd>{label}</span>
+                }).collect_view()}
+            </span>
+        </footer>
     }
 }
 
@@ -110,49 +135,69 @@ fn TabButton(tab: Tab, label: &'static str, nav: RwSignal<Nav>) -> impl IntoView
     }
 }
 
-fn today() -> String {
-    let opts = js_sys::Object::new();
-    for (k, v) in [("weekday", "short"), ("day", "numeric"), ("month", "short")] {
-        let _ = js_sys::Reflect::set(&opts, &k.into(), &v.into());
-    }
-    js_sys::Date::new_0().to_locale_date_string("es-CL", &opts).into()
+fn now() -> (String, String) {
+    let opts = |pairs: &[(&str, &str)]| {
+        let o = js_sys::Object::new();
+        for (k, v) in pairs {
+            let _ = js_sys::Reflect::set(&o, &(*k).into(), &(*v).into());
+        }
+        o
+    };
+    let d = js_sys::Date::new_0();
+    let time = d.to_locale_time_string_with_options("es-CL", &opts(&[("hour", "2-digit"), ("minute", "2-digit"), ("hourCycle", "h23")]));
+    let date = d.to_locale_date_string("es-CL", &opts(&[("weekday", "short"), ("day", "numeric"), ("month", "short")]));
+    (time.into(), date.into())
 }
 
 #[component]
 fn Clock() -> impl IntoView {
-    let date = RwSignal::new(today());
-    set_interval(move || date.set(today()), Duration::from_secs(30));
-    view! { <time class="clock">{date}</time> }
+    let t = RwSignal::new(now());
+    set_interval(move || t.set(now()), Duration::from_secs(10));
+    view! {
+        <div class="clock">
+            <time class="time">{move || t.get().0}</time>
+            <time class="date">{move || t.get().1}</time>
+        </div>
+    }
 }
 
 #[component]
-fn Home(games: RwSignal<Vec<Game>>, nav: RwSignal<Nav>, on_action: Callback<Action>) -> impl IntoView {
+fn Home(games: RwSignal<Vec<Game>>, nav: RwSignal<Nav>, on_action: Callback<Action>, launching: RwSignal<Option<usize>>) -> impl IntoView {
+    let title = move || {
+        let card = nav.with(|n| n.card);
+        games.with(|g| g.get(card.min(g.len().saturating_sub(1))).map(|g| g.name.clone()))
+    };
     view! {
-        <section class="carousel">
-            {move || {
-                let list = games.get();
-                if list.is_empty() {
-                    return view! { <p class="empty">"Sin juegos. Agrégalos en Settings."</p> }.into_any();
-                }
-                list.into_iter()
-                    .enumerate()
-                    .map(|(i, g)| view! { <GameCard i g nav on_action/> })
-                    .collect_view()
-                    .into_any()
-            }}
+        <section class="home" class:resting=move || nav.get().zone == Zone::Bar>
+            <h1 class="title">{title}</h1>
+            <div class="carousel">
+                {move || {
+                    let list = games.get();
+                    if list.is_empty() {
+                        return view! {
+                            <p class="empty">"Todavía no hay juegos. Entra a Settings y agrega el primero."</p>
+                        }.into_any();
+                    }
+                    list.into_iter()
+                        .enumerate()
+                        .map(|(i, g)| view! { <GameCard i g nav on_action launching/> })
+                        .collect_view()
+                        .into_any()
+                }}
+            </div>
         </section>
     }
 }
 
 #[component]
-fn GameCard(i: usize, g: Game, nav: RwSignal<Nav>, on_action: Callback<Action>) -> impl IntoView {
+fn GameCard(i: usize, g: Game, nav: RwSignal<Nav>, on_action: Callback<Action>, launching: RwSignal<Option<usize>>) -> impl IntoView {
     let el = NodeRef::<html::Button>::new();
     let selected = Memo::new(move |_| nav.with(|n| n.zone == Zone::Content && n.card == i));
     Effect::new(move |_| {
         if let (true, Some(el)) = (selected.get(), el.get()) {
             let o = web_sys::ScrollIntoViewOptions::new();
             o.set_behavior(web_sys::ScrollBehavior::Auto);
-            o.set_inline(web_sys::ScrollLogicalPosition::Center);
+            o.set_inline(web_sys::ScrollLogicalPosition::Nearest);
             el.scroll_into_view_with_scroll_into_view_options(&o);
         }
     });
@@ -162,7 +207,9 @@ fn GameCard(i: usize, g: Game, nav: RwSignal<Nav>, on_action: Callback<Action>) 
             class="card"
             tabindex="-1"
             node_ref=el
+            aria-label=g.name.clone()
             class:selected=move || selected.get()
+            class:launching=move || launching.get() == Some(i)
             on:mousedown=|e| e.prevent_default()
             on:click=move |_| {
                 nav.update(|n| {
@@ -177,7 +224,6 @@ fn GameCard(i: usize, g: Game, nav: RwSignal<Nav>, on_action: Callback<Action>) 
             } else {
                 view! { <img class="art" src=g.image alt=""/> }.into_any()
             }}
-            <span class="name">{g.name}</span>
         </button>
     }
 }
