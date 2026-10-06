@@ -1,4 +1,5 @@
 mod app;
+mod backend;
 mod hid_profile;
 mod nav;
 
