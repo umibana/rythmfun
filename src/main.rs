@@ -1,4 +1,5 @@
 mod app;
+mod hid_profile;
 mod nav;
 
 use app::*;
