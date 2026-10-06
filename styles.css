@@ -1,9 +1,4 @@
 @font-face {
-  font-family: "Dela Gothic One";
-  src: url("assets/fonts/dela-gothic-one.woff2") format("woff2");
-  font-display: swap;
-}
-@font-face {
   font-family: "M PLUS Rounded 1c";
   src: url("assets/fonts/mplus-rounded-500.woff2") format("woff2");
   font-weight: 500;
@@ -17,21 +12,23 @@
 }
 
 :root {
-  /* Taiko's two notes: don (red) is the selection, ka (blue) is the menu focus. */
-  --ink: #17132b;
-  --surface: #241e40;
-  --line: #3a3260;
-  --text: #f5f2fa;
-  --muted: #a39bc2;
-  --don: #ff4a3d;
-  --ka: #35c2ff;
+  --bg: #111216;
+  --glass: rgb(16 17 22 / 0.55);
+  --glass-strong: rgb(16 17 22 / 0.8);
+  --line: rgb(255 255 255 / 0.14);
+  --text: #f4f4f6;
+  --muted: rgb(244 244 246 / 0.65);
+  --danger: #ff6b6b;
   --gutter: clamp(1.5rem, 4vw, 4rem);
-  --tile: clamp(9rem, 21vw, 22rem);
-  --beat: 500ms; /* 120 BPM */
-  font-family: "M PLUS Rounded 1c", system-ui, sans-serif;
+  --w: clamp(15rem, 26vw, 30rem); /* cover width, 16:9 */
+  --gap: clamp(1.5rem, 3vw, 3rem);
+  /* Slide: fast start, long soft settle. Pop: tiny overshoot on the selected cover. */
+  --slide: cubic-bezier(0.22, 1, 0.36, 1);
+  --pop: cubic-bezier(0.34, 1.4, 0.64, 1);
+  font-family: "M PLUS Rounded 1c", "Segoe UI", system-ui, sans-serif;
   font-weight: 500;
   color: var(--text);
-  background: var(--ink);
+  background: var(--bg);
 }
 
 * { box-sizing: border-box; }
@@ -41,195 +38,229 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--ink);
   overflow: hidden;
   user-select: none;
 }
 
-main { flex: 1; min-height: 0; }
+main { flex: 1; min-height: 0; position: relative; }
 
-button {
+/* Wallpaper: user image, or a quiet graphite default. The scrim keeps text readable on any image. */
+.wallpaper {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: radial-gradient(ellipse 80% 70% at 50% 45%, #2a2c33, var(--bg));
+  background-size: cover;
+  background-position: center;
+}
+.wallpaper.custom::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(rgb(0 0 0 / 0.55), transparent 22%, transparent 70%, rgb(0 0 0 / 0.6)),
+    rgb(0 0 0 / 0.15);
+}
+
+button, .button {
   font: inherit;
   color: inherit;
-  background: var(--surface);
-  border: 2px solid transparent;
+  background: var(--glass);
+  border: 1px solid var(--line);
   border-radius: 999px;
   padding: 0.5rem 1.1rem;
   cursor: pointer;
+  backdrop-filter: blur(12px);
 }
-button:focus-visible, input:focus-visible { outline: 3px solid var(--ka); outline-offset: 2px; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 
 /* Top bar */
 .bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1.5rem var(--gutter) 0;
+  padding: 1.25rem var(--gutter) 0;
+  text-shadow: 0 1px 8px rgb(0 0 0 / 0.5);
 }
-.bar nav { display: flex; gap: 0.25rem; }
+.bar nav {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border-radius: 999px;
+  background: var(--glass);
+  backdrop-filter: blur(12px);
+}
 .tab {
   background: none;
+  border: 0;
+  backdrop-filter: none;
   color: var(--muted);
   font-weight: 800;
-  font-size: 1.1rem;
-  padding: 0.45rem 1.2rem;
+  padding: 0.4rem 1.1rem;
+  transition: background-color 200ms ease, color 200ms ease;
 }
-.tab.current { color: var(--text); background: var(--surface); }
-.tab.focused { border-color: var(--ka); color: var(--text); }
-.clock { display: flex; align-items: baseline; gap: 0.75rem; }
-.clock .time { font-family: "Dela Gothic One", sans-serif; font-size: 1.6rem; }
+.tab.current { color: var(--text); }
+.tab.focused { background: var(--text); color: var(--bg); text-shadow: none; }
+.clock { display: flex; align-items: baseline; gap: 0.6rem; }
+.clock .time { font-weight: 800; font-size: 1.4rem; }
 .clock .date { color: var(--muted); }
 .clock .date::first-letter { text-transform: uppercase; }
 
 .status {
-  margin: 1rem var(--gutter) 0;
-  padding: 0.6rem 1rem;
-  background: var(--surface);
-  border-radius: 12px;
-  border-left: 6px solid var(--ka);
+  position: absolute;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+  margin: 0;
+  padding: 0.55rem 1.2rem;
+  border-radius: 999px;
+  background: var(--glass-strong);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--line);
   cursor: pointer;
+  animation: drop 260ms var(--slide);
 }
-.status.error { border-left-color: var(--don); }
+.status.error { border-color: var(--danger); }
+@keyframes drop { from { opacity: 0; transform: translate(-50%, -8px); } }
 
-/* Home */
+/* Home: one centered row, the selected cover always at screen center. */
 .home {
   height: 100%;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 0.5rem;
-}
-.title {
-  margin: 0;
-  padding: 0 var(--gutter);
-  font-family: "Dela Gothic One", sans-serif;
-  font-weight: 400;
-  font-size: clamp(1.75rem, 3.6vw, 3.25rem);
-  line-height: 1.1;
-  min-height: 1.1em;
-  white-space: nowrap;
+  gap: 1.75rem;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
-.home.resting .title { color: var(--muted); }
-
-.carousel {
+.track {
   display: flex;
-  gap: clamp(1rem, 1.6vw, 1.75rem);
-  padding: 1.5rem var(--gutter) 2.5rem;
-  scroll-padding-inline: var(--gutter);
-  overflow-x: auto;
-  scrollbar-width: none;
-  scroll-behavior: smooth;
+  gap: var(--gap);
+  padding: 2rem 0;
+  transform: translateX(calc(50vw - var(--w) / 2 - var(--i) * (var(--w) + var(--gap))));
+  transition: transform 550ms var(--slide);
 }
 .card {
-  position: relative;
-  flex: 0 0 var(--tile);
-  aspect-ratio: 1;
+  flex: 0 0 var(--w);
+  aspect-ratio: 16 / 9;
   padding: 0;
   border: 0;
-  border-radius: 14px;
-  background: var(--surface);
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgb(255 255 255 / 0.08);
+  backdrop-filter: none;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.35);
+  filter: brightness(0.6) saturate(0.85);
+  transition:
+    transform 450ms var(--pop),
+    filter 300ms ease,
+    box-shadow 300ms ease;
 }
-.card .art {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border-radius: inherit;
-  display: block;
+.card.selected {
+  transform: scale(1.08);
+  filter: none;
+  box-shadow:
+    0 0 0 3px var(--text),
+    0 22px 50px rgb(0 0 0 / 0.55);
 }
+.home.resting .card.selected { transform: scale(1.04); box-shadow: 0 0 0 2px var(--line), 0 14px 40px rgb(0 0 0 / 0.45); }
+.card .art { width: 100%; height: 100%; object-fit: cover; display: block; }
 .card .placeholder {
   display: grid;
   place-items: center;
-  font-family: "Dela Gothic One", sans-serif;
-  font-size: calc(var(--tile) * 0.45);
+  font-size: calc(var(--w) * 0.25);
+  font-weight: 800;
   color: var(--muted);
 }
+.card.launching { animation: press 420ms var(--pop); }
+@keyframes press { 30% { transform: scale(1.04); } }
 
-/* Selection: a solid don ring plus an approach ring that closes on it every beat. */
-.card.selected::before,
-.card.selected::after {
-  content: "";
-  position: absolute;
-  pointer-events: none;
-  border-radius: 20px;
+.caption {
+  margin: 0;
+  text-align: center;
+  font-weight: 800;
+  font-size: clamp(1.4rem, 2.4vw, 2.2rem);
+  text-shadow: 0 2px 14px rgb(0 0 0 / 0.6);
+  animation: rise 380ms var(--slide);
 }
-.card.selected::before { inset: -8px; border: 5px solid var(--don); }
-.card.selected::after {
-  inset: -8px;
-  border: 3px solid var(--don);
-  animation: approach var(--beat) linear infinite;
-}
-@keyframes approach {
-  from { inset: -30px; opacity: 0; border-radius: 34px; }
-  85% { opacity: 0.9; }
-  to { inset: -8px; opacity: 0; border-radius: 20px; }
-}
-.home.resting .card.selected::before { border-color: var(--line); }
-.home.resting .card.selected::after { animation: none; opacity: 0; }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+.home.resting .caption { color: var(--muted); }
 
-/* A drum hit when a game starts. */
-.card.launching { animation: hit 450ms ease-out; }
-@keyframes hit {
-  0% { transform: scale(1); }
-  25% { transform: scale(0.93); }
-  60% { transform: scale(1.04); }
-  100% { transform: scale(1); }
-}
-
-.empty { margin: 0; color: var(--muted); font-size: 1.15rem; max-width: 40ch; }
+.empty { margin: 0 auto; color: var(--muted); font-size: 1.15rem; max-width: 40ch; text-align: center; }
 
 /* Bottom hints */
 .hints {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin: 0 var(--gutter);
-  padding: 0.9rem 0 1.1rem;
-  border-top: 1px solid var(--line);
+  padding: 0.9rem var(--gutter) 1.1rem;
   color: var(--muted);
+  font-size: 0.95rem;
+  text-shadow: 0 1px 8px rgb(0 0 0 / 0.5);
 }
-.keys { display: flex; gap: 1.5rem; }
-.hint { display: inline-flex; align-items: center; gap: 0.5rem; color: var(--text); }
+.keys { display: flex; gap: 1.25rem; }
+.hint { display: inline-flex; align-items: center; gap: 0.45rem; color: var(--text); }
 kbd {
-  font: 800 0.85rem/1 "M PLUS Rounded 1c", sans-serif;
-  min-width: 1.9rem;
-  padding: 0.35rem 0.5rem;
+  font: 800 0.8rem/1 "M PLUS Rounded 1c", sans-serif;
+  min-width: 1.8rem;
+  padding: 0.3rem 0.45rem;
   border-radius: 999px;
   background: var(--text);
-  color: var(--ink);
+  color: var(--bg);
   text-align: center;
+  text-shadow: none;
 }
 
-/* Settings */
-.settings { padding: 1rem var(--gutter) 2rem; height: 100%; overflow-y: auto; user-select: text; scrollbar-color: var(--line) transparent; }
-.settings h2 { font-family: "Dela Gothic One", sans-serif; font-weight: 400; font-size: 1.4rem; margin: 1rem 0; }
+/* Settings: a glass panel over the wallpaper. */
+.settings {
+  height: calc(100% - 1.5rem);
+  max-width: 64rem;
+  margin: 1.5rem auto 0;
+  padding: 0.5rem 2rem 2rem;
+  overflow-y: auto;
+  user-select: text;
+  border-radius: 18px;
+  background: var(--glass-strong);
+  backdrop-filter: blur(20px);
+  scrollbar-color: var(--line) transparent;
+  animation: rise 320ms var(--slide);
+}
+.settings h2 { font-weight: 800; font-size: 1.15rem; margin: 1.5rem 0 0.75rem; }
 .row { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem; }
 .row input:not([type="file"]) {
   font: inherit;
   color: inherit;
-  background: var(--surface);
+  background: rgb(255 255 255 / 0.06);
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 0.55rem 0.8rem;
 }
 .row .path { flex: 1; }
 .thumb {
-  width: 3rem;
-  height: 3rem;
-  border-radius: 10px;
-  background: var(--surface);
+  width: 4.5rem;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.06);
   border: 1px dashed var(--line);
   overflow: hidden;
   cursor: pointer;
   flex: none;
 }
-.thumb img { width: 100%; height: 100%; object-fit: cover; }
-.thumb input { display: none; }
-.actions { display: flex; gap: 0.5rem; margin: 1rem 0 2rem; }
-.raw { background: var(--surface); padding: 1rem; border-radius: 12px; min-height: 3rem; white-space: pre-wrap; color: var(--muted); }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb input, .button input { display: none; }
+.actions { display: flex; gap: 0.5rem; margin: 1rem 0 0; }
+.wallpaper-row { display: flex; gap: 0.75rem; align-items: center; }
+.wallpaper-preview {
+  width: 8rem;
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: radial-gradient(ellipse 80% 70% at 50% 45%, #2a2c33, var(--bg));
+  background-size: cover;
+  background-position: center;
+}
+.raw { background: rgb(255 255 255 / 0.05); padding: 1rem; border-radius: 12px; min-height: 3rem; white-space: pre-wrap; color: var(--muted); }
 
 @media (prefers-reduced-motion: reduce) {
-  * { transition: none !important; scroll-behavior: auto !important; }
-  .card.selected::after, .card.launching { animation: none; }
+  *, *::before, *::after { transition: none !important; animation: none !important; }
 }

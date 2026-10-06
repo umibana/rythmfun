@@ -27,10 +27,36 @@ fn write_games(file: &Path, games: &[Game]) -> Result<(), String> {
     std::fs::rename(&tmp, file).map_err(|e| e.to_string())
 }
 
-fn games_file(app: &AppHandle) -> Result<PathBuf, String> {
+fn config_file(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
     let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir.join("games.json"))
+    Ok(dir.join(name))
+}
+
+fn games_file(app: &AppHandle) -> Result<PathBuf, String> {
+    config_file(app, "games.json")
+}
+
+/// Wallpaper is kept as a data URL in its own file so games.json stays small.
+#[tauri::command]
+fn load_wallpaper(app: AppHandle) -> Result<Option<String>, String> {
+    match std::fs::read_to_string(config_file(&app, "wallpaper.txt")?) {
+        Ok(s) => Ok(Some(s)),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+fn save_wallpaper(app: AppHandle, wallpaper: Option<String>) -> Result<(), String> {
+    let file = config_file(&app, "wallpaper.txt")?;
+    match wallpaper {
+        Some(w) => std::fs::write(file, w).map_err(|e| e.to_string()),
+        None => match std::fs::remove_file(file) {
+            Err(e) if e.kind() != ErrorKind::NotFound => Err(e.to_string()),
+            _ => Ok(()),
+        },
+    }
 }
 
 #[tauri::command]
@@ -82,7 +108,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![load_games, save_games, launch, pick_game_path])
+        .invoke_handler(tauri::generate_handler![load_games, save_games, load_wallpaper, save_wallpaper, launch, pick_game_path])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -49,14 +49,17 @@ pub async fn load_games() -> Result<Vec<Game>, String> {
         let v = call("load_games", NoArgs {}).await?;
         serde_wasm_bindgen::from_value(v).map_err(|e| e.to_string())
     } else {
-        Ok(match storage().get_item(STORAGE_KEY).ok().flatten() {
-            Some(s) => serde_json::from_str(&s).unwrap_or_default(),
-            None => demo_games(),
-        })
+        let saved: Vec<Game> = storage()
+            .get_item(STORAGE_KEY)
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+        Ok(if saved.is_empty() { demo_games() } else { saved })
     }
 }
 
-/// Browser dev only: sample games shown until something is saved, so the UI has content.
+/// Browser dev only: sample games shown while the saved list is empty, so the UI has content.
 fn demo_games() -> Vec<Game> {
     [
         ("Taiko no Tatsujin", "taiko"),
@@ -109,4 +112,31 @@ pub async fn pick_game_path() -> Option<String> {
 
 pub async fn read_as_data_url(file: web_sys::File) -> Result<String, String> {
     read_as_data_url_js(file).await.map_err(js_err)?.as_string().ok_or("imagen inválida".into())
+}
+
+const WALLPAPER_KEY: &str = "wallpaper";
+
+pub async fn load_wallpaper() -> Result<Option<String>, String> {
+    if is_tauri() {
+        let v = call("load_wallpaper", NoArgs {}).await?;
+        serde_wasm_bindgen::from_value(v).map_err(|e| e.to_string())
+    } else {
+        Ok(storage().get_item(WALLPAPER_KEY).ok().flatten())
+    }
+}
+
+pub async fn save_wallpaper(wallpaper: Option<&str>) -> Result<(), String> {
+    if is_tauri() {
+        #[derive(Serialize)]
+        struct Args<'a> {
+            wallpaper: Option<&'a str>,
+        }
+        call("save_wallpaper", Args { wallpaper }).await.map(|_| ())
+    } else {
+        // ponytail: localStorage caps around 5 MB; big wallpapers only fail in browser dev, not in Tauri.
+        match wallpaper {
+            Some(w) => storage().set_item(WALLPAPER_KEY, w).map_err(|_| "imagen demasiado grande para el navegador".into()),
+            None => storage().remove_item(WALLPAPER_KEY).map_err(js_err),
+        }
+    }
 }

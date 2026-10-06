@@ -2,7 +2,7 @@ use crate::backend::{self, Game};
 use crate::input;
 use crate::nav::{Action, Nav, Outcome, Tab, Zone};
 use crate::sound;
-use leptos::{html, prelude::*, task::spawn_local};
+use leptos::{prelude::*, task::spawn_local};
 use std::time::Duration;
 use web_sys::HtmlInputElement;
 
@@ -14,6 +14,12 @@ pub fn App() -> impl IntoView {
     let hid_name = RwSignal::new(None::<String>);
     let hid_raw = RwSignal::new(String::new());
     let launching = RwSignal::new(None::<usize>);
+    let wallpaper = RwSignal::new(None::<String>);
+    spawn_local(async move {
+        if let Ok(w) = backend::load_wallpaper().await {
+            wallpaper.set(w);
+        }
+    });
     // Autosave stays off after a failed load so it cannot overwrite the real file.
     let loaded = RwSignal::new(false);
 
@@ -76,6 +82,11 @@ pub fn App() -> impl IntoView {
     let tab = Memo::new(move |_| nav.get().tab);
 
     view! {
+        <div
+            class="wallpaper"
+            class:custom=move || wallpaper.with(Option::is_some)
+            style=move || wallpaper.get().map(|w| format!("background-image: url(\"{w}\")")).unwrap_or_default()
+        ></div>
         <header class="bar" class:active=move || nav.get().zone == Zone::Bar>
             <nav>
                 <TabButton tab=Tab::Home label="Home" nav/>
@@ -89,7 +100,7 @@ pub fn App() -> impl IntoView {
         <main>
             {move || match tab.get() {
                 Tab::Home => view! { <Home games nav on_action launching/> }.into_any(),
-                Tab::Settings => view! { <Settings games loaded status hid_name hid_raw connect_hid/> }.into_any(),
+                Tab::Settings => view! { <Settings games loaded status wallpaper hid_name hid_raw connect_hid/> }.into_any(),
             }}
         </main>
         <Hints nav hid_name/>
@@ -163,50 +174,47 @@ fn Clock() -> impl IntoView {
 
 #[component]
 fn Home(games: RwSignal<Vec<Game>>, nav: RwSignal<Nav>, on_action: Callback<Action>, launching: RwSignal<Option<usize>>) -> impl IntoView {
-    let title = move || {
-        let card = nav.with(|n| n.card);
-        games.with(|g| g.get(card.min(g.len().saturating_sub(1))).map(|g| g.name.clone()))
-    };
+    // The track slides so the selected cover always sits at screen center.
+    let card = Memo::new(move |_| {
+        let n = games.with(Vec::len);
+        nav.with(|nav| nav.card.min(n.saturating_sub(1)))
+    });
+    let name = move || games.with(|g| g.get(card.get()).map(|g| g.name.clone()).unwrap_or_default());
     view! {
         <section class="home" class:resting=move || nav.get().zone == Zone::Bar>
-            <h1 class="title">{title}</h1>
-            <div class="carousel">
-                {move || {
-                    let list = games.get();
-                    if list.is_empty() {
-                        return view! {
-                            <p class="empty">"Todavía no hay juegos. Entra a Settings y agrega el primero."</p>
-                        }.into_any();
-                    }
-                    list.into_iter()
-                        .enumerate()
-                        .map(|(i, g)| view! { <GameCard i g nav on_action launching/> })
-                        .collect_view()
-                        .into_any()
-                }}
-            </div>
+            {move || {
+                let list = games.get();
+                if list.is_empty() {
+                    return view! {
+                        <p class="empty">"Todavía no hay juegos. Entra a Settings y agrega el primero."</p>
+                    }.into_any();
+                }
+                view! {
+                    <div class="track" style=move || format!("--i: {}", card.get())>
+                        {list.into_iter()
+                            .enumerate()
+                            .map(|(i, g)| view! { <GameCard i g card nav on_action launching/> })
+                            .collect_view()}
+                    </div>
+                }.into_any()
+            }}
+            // Re-created on every change so the fade-in replays.
+            {move || {
+                let n = name();
+                view! { <p class="caption">{n}</p> }
+            }}
         </section>
     }
 }
 
 #[component]
-fn GameCard(i: usize, g: Game, nav: RwSignal<Nav>, on_action: Callback<Action>, launching: RwSignal<Option<usize>>) -> impl IntoView {
-    let el = NodeRef::<html::Button>::new();
-    let selected = Memo::new(move |_| nav.with(|n| n.zone == Zone::Content && n.card == i));
-    Effect::new(move |_| {
-        if let (true, Some(el)) = (selected.get(), el.get()) {
-            let o = web_sys::ScrollIntoViewOptions::new();
-            o.set_behavior(web_sys::ScrollBehavior::Auto);
-            o.set_inline(web_sys::ScrollLogicalPosition::Nearest);
-            el.scroll_into_view_with_scroll_into_view_options(&o);
-        }
-    });
+fn GameCard(i: usize, g: Game, card: Memo<usize>, nav: RwSignal<Nav>, on_action: Callback<Action>, launching: RwSignal<Option<usize>>) -> impl IntoView {
+    let selected = Memo::new(move |_| card.get() == i);
     let initial = g.name.chars().next().unwrap_or('?').to_string();
     view! {
         <button
             class="card"
             tabindex="-1"
-            node_ref=el
             aria-label=g.name.clone()
             class:selected=move || selected.get()
             class:launching=move || launching.get() == Some(i)
@@ -222,7 +230,7 @@ fn GameCard(i: usize, g: Game, nav: RwSignal<Nav>, on_action: Callback<Action>, 
             {if g.image.is_empty() {
                 view! { <div class="art placeholder">{initial}</div> }.into_any()
             } else {
-                view! { <img class="art" src=g.image alt=""/> }.into_any()
+                view! { <img class="art" src=g.image alt="" draggable="false"/> }.into_any()
             }}
         </button>
     }
@@ -235,6 +243,7 @@ fn Settings(
     games: RwSignal<Vec<Game>>,
     loaded: RwSignal<bool>,
     status: RwSignal<Option<(String, bool)>>,
+    wallpaper: RwSignal<Option<String>>,
     hid_name: RwSignal<Option<String>>,
     hid_raw: RwSignal<String>,
     connect_hid: Callback<bool>,
@@ -271,6 +280,9 @@ fn Settings(
             <div class="actions">
                 <button on:click=move |_| draft.update(|v| v.push(fresh(Game::default())))>"Agregar juego"</button>
             </div>
+
+            <h2>"Fondo de pantalla"</h2>
+            <Wallpaper wallpaper status/>
 
             <h2>"Controlador"</h2>
             <p>{move || hid_name.get().unwrap_or_else(|| "Ningún dispositivo HID conectado".into())}</p>
@@ -332,6 +344,44 @@ fn GameRow(id: u32, g: RwSignal<Game>, draft: Draft) -> impl IntoView {
             <button title="Subir" on:click=move |_| shift(-1)>"↑"</button>
             <button title="Bajar" on:click=move |_| shift(1)>"↓"</button>
             <button title="Quitar" on:click=move |_| draft.update(|v| v.retain(|(k, _)| *k != id))>"✕"</button>
+        </div>
+    }
+}
+
+#[component]
+fn Wallpaper(wallpaper: RwSignal<Option<String>>, status: RwSignal<Option<(String, bool)>>) -> impl IntoView {
+    let set = move |w: Option<String>| {
+        spawn_local(async move {
+            match backend::save_wallpaper(w.as_deref()).await {
+                Ok(()) => wallpaper.set(w),
+                Err(e) => status.set(Some((format!("No se pudo guardar el fondo: {e}"), true))),
+            }
+        })
+    };
+    let on_pick = move |e: leptos::ev::Event| {
+        let input: HtmlInputElement = event_target(&e);
+        if let Some(file) = input.files().and_then(|l| l.get(0)) {
+            spawn_local(async move {
+                match backend::read_as_data_url(file).await {
+                    Ok(url) => set(Some(url)),
+                    Err(e) => status.set(Some((format!("No se pudo leer la imagen: {e}"), true))),
+                }
+            });
+        }
+    };
+    view! {
+        <div class="wallpaper-row">
+            <div
+                class="wallpaper-preview"
+                style=move || wallpaper.get().map(|w| format!("background-image: url(\"{w}\")")).unwrap_or_default()
+            ></div>
+            <label class="button">
+                "Elegir imagen"
+                <input type="file" accept="image/*" on:change=on_pick/>
+            </label>
+            {move || wallpaper.with(Option::is_some).then(|| view! {
+                <button on:click=move |_| set(None)>"Quitar fondo"</button>
+            })}
         </div>
     }
 }
