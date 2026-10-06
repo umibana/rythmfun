@@ -1,6 +1,7 @@
 mod app;
 mod backend;
 mod hid_profile;
+mod input;
 mod nav;
 mod sound;
 
