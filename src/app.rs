@@ -10,24 +10,25 @@ use web_sys::HtmlInputElement;
 pub fn App() -> impl IntoView {
     let games = RwSignal::new(Vec::<Game>::new());
     let nav = RwSignal::new(Nav::default());
-    let status = RwSignal::new(None::<String>);
+    let status = RwSignal::new(None::<(String, bool)>); // (message, is_error)
     let hid_name = RwSignal::new(None::<String>);
     let hid_raw = RwSignal::new(String::new());
 
     spawn_local(async move {
         match backend::load_games().await {
             Ok(g) => games.set(g),
-            Err(e) => status.set(Some(format!("No se pudieron cargar los juegos: {e}"))),
+            Err(e) => status.set(Some((format!("No se pudieron cargar los juegos: {e}"), true))),
         }
     });
 
     let on_action = Callback::new(move |a: Action| {
+        status.set(None);
         let n = games.with_untracked(Vec::len);
         let (next, out) = nav.get_untracked().step(a, n);
         nav.set(next);
         let pan = if n > 1 { next.card as f64 / (n - 1) as f64 * 2.0 - 1.0 } else { 0.0 };
         match out {
-            Outcome::Moved => sound::play("tick", pan),
+            Outcome::Moved => sound::play("tick", if next.zone == Zone::Bar { 0.0 } else { pan }),
             Outcome::Confirmed => sound::play("press", 0.0),
             Outcome::Back => sound::play("release", 0.0),
             Outcome::Launch(i) => {
@@ -35,7 +36,7 @@ pub fn App() -> impl IntoView {
                 let path = games.with_untracked(|g| g[i].path.clone());
                 spawn_local(async move {
                     if let Err(e) = backend::launch(&path).await {
-                        status.set(Some(format!("No se pudo lanzar: {e}")));
+                        status.set(Some((format!("No se pudo lanzar: {e}"), true)));
                     }
                 });
             }
@@ -52,7 +53,7 @@ pub fn App() -> impl IntoView {
                 Ok(Some(i)) => hid_name.set(Some(format!("{} ({:04x}:{:04x})", i.name, i.vendor_id, i.product_id))),
                 Ok(None) => {}
                 // Silent on startup (browser without WebHID); shown when the user clicked.
-                Err(e) if ask => status.set(Some(e)),
+                Err(e) if ask => status.set(Some((e, true))),
                 Err(e) => leptos::logging::log!("HID: {e}"),
             }
         })
@@ -69,8 +70,8 @@ pub fn App() -> impl IntoView {
             </nav>
             <Clock/>
         </header>
-        {move || status.get().map(|s| view! {
-            <p class="status" on:click=move |_| status.set(None)>{s}</p>
+        {move || status.get().map(|(s, err)| view! {
+            <p class="status" class:error=err role="status" on:click=move |_| status.set(None)>{s}</p>
         })}
         <main>
             {move || match tab.get() {
@@ -137,11 +138,11 @@ fn Home(games: RwSignal<Vec<Game>>, nav: RwSignal<Nav>, on_action: Callback<Acti
 #[component]
 fn GameCard(i: usize, g: Game, nav: RwSignal<Nav>, on_action: Callback<Action>) -> impl IntoView {
     let el = NodeRef::<html::Button>::new();
-    let selected = move || nav.with(|n| n.zone == Zone::Content && n.card == i);
+    let selected = Memo::new(move |_| nav.with(|n| n.zone == Zone::Content && n.card == i));
     Effect::new(move |_| {
-        if let (true, Some(el)) = (selected(), el.get()) {
+        if let (true, Some(el)) = (selected.get(), el.get()) {
             let o = web_sys::ScrollIntoViewOptions::new();
-            o.set_behavior(web_sys::ScrollBehavior::Smooth);
+            o.set_behavior(web_sys::ScrollBehavior::Auto);
             o.set_inline(web_sys::ScrollLogicalPosition::Center);
             el.scroll_into_view_with_scroll_into_view_options(&o);
         }
@@ -152,7 +153,7 @@ fn GameCard(i: usize, g: Game, nav: RwSignal<Nav>, on_action: Callback<Action>) 
             class="card"
             tabindex="-1"
             node_ref=el
-            class:selected=selected
+            class:selected=move || selected.get()
             on:mousedown=|e| e.prevent_default()
             on:click=move |_| {
                 nav.update(|n| {
@@ -177,7 +178,7 @@ type Draft = RwSignal<Vec<(u32, RwSignal<Game>)>>;
 #[component]
 fn Settings(
     games: RwSignal<Vec<Game>>,
-    status: RwSignal<Option<String>>,
+    status: RwSignal<Option<(String, bool)>>,
     hid_name: RwSignal<Option<String>>,
     hid_raw: RwSignal<String>,
     connect_hid: Callback<bool>,
@@ -193,11 +194,13 @@ fn Settings(
 
     let save = move |_| {
         let list: Vec<Game> = draft.with_untracked(|v| v.iter().map(|(_, g)| g.get_untracked()).collect());
-        games.set(list.clone());
         spawn_local(async move {
             let msg = match backend::save_games(&list).await {
-                Ok(()) => "Guardado.".to_string(),
-                Err(e) => format!("No se pudo guardar: {e}"),
+                Ok(()) => {
+                    games.set(list);
+                    ("Guardado.".to_string(), false)
+                }
+                Err(e) => (format!("No se pudo guardar: {e}"), true),
             };
             status.set(Some(msg));
         });
