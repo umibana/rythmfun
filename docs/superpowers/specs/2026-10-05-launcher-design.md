@@ -25,7 +25,8 @@ Tauri commands:
 |---|---|
 | `load_games() -> Vec<Game>` | Reads `games.json` from the app config dir. Missing file → empty list. |
 | `save_games(games: Vec<Game>)` | Writes `games.json` to the app config dir. |
-| `launch(path: String)` | `tauri-plugin-opener` `open_path` (already installed). Windows runs `.bat` / `.lnk` with its default handler. |
+| `launch(path: String)` | Windows: `cmd /C start "" "<path>"` with `current_dir` = the game's folder (scripts use relative paths). Other OS (dev): `tauri-plugin-opener` `open_path`. |
+| `pick_game_path() -> Option<String>` | Native file picker (`tauri-plugin-dialog`) for `.bat`/`.lnk`/`.exe`. |
 
 `Game { name: String, path: String, image: String }`. `image` is a data URL.
 `ponytail:` data URL keeps us off the asset protocol; ceiling = big JSON with large images,
@@ -37,7 +38,7 @@ New dependency: `tauri-plugin-dialog` (file picker for `.bat`/`.lnk` and images)
 
 - `App`: top bar (Home, Settings, date top-right) + active view.
 - `Home`: horizontal carousel of big cards, 3–4 visible, focused card scrolls into view.
-- `Settings`: games editor (add / edit / remove / reorder by mouse; file pickers) +
+- `Settings`: games editor (add / edit / remove / reorder by mouse; file pickers; autosaves on every edit) +
   controller section (connect HID button, detected device, raw report bytes).
 - Backend bridge: if `window.__TAURI__` exists call Tauri commands; otherwise (browser dev)
   games live in `localStorage` and `launch` logs to console. File pickers in browser mode
@@ -54,10 +55,11 @@ enum Action { Left, Right, Confirm, Back }
 UI only consumes `Action`. Sources feed one shared signal:
 
 1. **Keyboard:** `ArrowLeft`, `ArrowRight`, `Enter`, `Backspace`.
-2. **Gamepad API:** polling via `requestAnimationFrame`, standard mapping
+2. **Gamepad API:** polling every 16 ms, standard mapping
    (d-pad left/right + left stick X with deadzone, A = Confirm, B = Back). Edge-triggered.
 3. **WebHID:** "Connect controller" button in Settings → `navigator.hid.requestDevice`
-   with Yuancon's filters. Profile table keyed by `VID:PID`:
+   filtered by Yuancon's vendor id. Previously granted devices reopen on startup
+   (`getDevices`) and on replug (`connect` event). Profile table keyed by `VID:PID`:
    - Yuancon tassa: VID `0x5F73`, PID `0x0010` / `0x0011`, vendor collection
      `usagePage 0xFF71`, `usage 0x61` (taken from yuancon.app).
    - Profile = `fn(&[u8]) -> Vec<Action>`. Tassa input layout is unknown, so the first
@@ -74,8 +76,8 @@ UI only consumes `Action`. Sources feed one shared signal:
 ## Sound
 
 Generative UI sounds with Foley (`@foleyjs/core` 2.9.0, MIT, single 41 KB ES module,
-no deps, Web Audio synthesis — no audio files). Vendored as `public/vendor/foley.js`
-(license header kept) and imported via `#[wasm_bindgen(module = "/public/vendor/foley.js")]`
+no deps, Web Audio synthesis — no audio files). Vendored as `src/vendor/foley.js`
+(+ `src/vendor/FOLEY_LICENSE`) and imported via `#[wasm_bindgen(module = "/src/vendor/foley.js")]`
 binding only `play(name, opts)`. Offline-safe, repo-safe.
 
 | Event | Cue | Extra |
