@@ -14,11 +14,15 @@ const GAMEPAD_POLL: Duration = Duration::from_millis(16);
 /// Arrows, Enter, Backspace. Ignored while typing in a text field.
 pub fn keyboard(on: impl Fn(Action) + 'static) {
     let _ = window_event_listener(ev::keydown, move |e: KeyboardEvent| {
-        let typing = e
+        if e.alt_key() || e.ctrl_key() || e.meta_key() {
+            return;
+        }
+        let tag = e
             .target()
             .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
-            .is_some_and(|el| matches!(el.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT"));
-        if typing {
+            .map(|el| el.tag_name())
+            .unwrap_or_default();
+        if matches!(tag.as_str(), "INPUT" | "TEXTAREA" | "SELECT") {
             return;
         }
         let a = match e.key().as_str() {
@@ -28,6 +32,15 @@ pub fn keyboard(on: impl Fn(Action) + 'static) {
             "Backspace" => Action::Back,
             _ => return,
         };
+        // A focused button handles Enter natively (click).
+        if tag == "BUTTON" && a == Action::Confirm {
+            return;
+        }
+        // Held Enter/Backspace must not repeat: it would launch games repeatedly.
+        if e.repeat() && matches!(a, Action::Confirm | Action::Back) {
+            e.prevent_default();
+            return;
+        }
         e.prevent_default();
         on(a);
     });
@@ -95,10 +108,13 @@ pub async fn hid(ask: bool, on: impl Fn(Action) + 'static, on_raw: impl Fn(Strin
     let prev = RefCell::new(HashMap::<(u16, u16, u8), Vec<u8>>::new());
     let cb = Closure::<dyn Fn(u16, u16, u8, js_sys::Uint8Array)>::new(move |vid, pid, rid, data: js_sys::Uint8Array| {
         let now = data.to_vec();
-        let hex: Vec<String> = now.iter().map(|b| format!("{b:02x}")).collect();
-        on_raw(format!("{vid:04x}:{pid:04x} #{rid}  {}", hex.join(" ")));
         let mut prev = prev.borrow_mut();
         let last = prev.entry((vid, pid, rid)).or_default();
+        if *last == now {
+            return; // pads can stream identical reports at 1 kHz
+        }
+        let hex: Vec<String> = now.iter().map(|b| format!("{b:02x}")).collect();
+        on_raw(format!("{vid:04x}:{pid:04x} #{rid}  {}", hex.join(" ")));
         for a in pressed(profile(vid, pid), rid, last, &now) {
             on(a);
         }
