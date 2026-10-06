@@ -1,4 +1,5 @@
 mod app;
+mod nav;
 
 use app::*;
 use leptos::prelude::*;
