@@ -13,15 +13,24 @@ pub fn App() -> impl IntoView {
     let status = RwSignal::new(None::<(String, bool)>); // (message, is_error)
     let hid_name = RwSignal::new(None::<String>);
     let hid_raw = RwSignal::new(String::new());
+    // Autosave stays off after a failed load so it cannot overwrite the real file.
+    let loaded = RwSignal::new(false);
 
     spawn_local(async move {
         match backend::load_games().await {
-            Ok(g) => games.set(g),
+            Ok(g) => {
+                games.set(g);
+                loaded.set(true);
+            }
             Err(e) => status.set(Some((format!("No se pudieron cargar los juegos: {e}"), true))),
         }
     });
 
     let on_action = Callback::new(move |a: Action| {
+        // Gamepad/HID keep arriving while a game runs; don't act on them (Confirm would relaunch).
+        if !document().has_focus().unwrap_or(true) {
+            return;
+        }
         status.set(None);
         let n = games.with_untracked(Vec::len);
         let (next, out) = nav.get_untracked().step(a, n);
@@ -76,7 +85,7 @@ pub fn App() -> impl IntoView {
         <main>
             {move || match tab.get() {
                 Tab::Home => view! { <Home games nav on_action/> }.into_any(),
-                Tab::Settings => view! { <Settings games status hid_name hid_raw connect_hid/> }.into_any(),
+                Tab::Settings => view! { <Settings games loaded status hid_name hid_raw connect_hid/> }.into_any(),
             }}
         </main>
     }
@@ -178,6 +187,7 @@ type Draft = RwSignal<Vec<(u32, RwSignal<Game>)>>;
 #[component]
 fn Settings(
     games: RwSignal<Vec<Game>>,
+    loaded: RwSignal<bool>,
     status: RwSignal<Option<(String, bool)>>,
     hid_name: RwSignal<Option<String>>,
     hid_raw: RwSignal<String>,
@@ -195,7 +205,7 @@ fn Settings(
     // ponytail: writes on every edit; debounce if images make this slow.
     Effect::new(move |prev: Option<()>| {
         let list: Vec<Game> = draft.with(|v| v.iter().map(|(_, g)| g.get()).collect());
-        if prev.is_none() {
+        if prev.is_none() || !loaded.get_untracked() {
             return;
         }
         games.set(list.clone());

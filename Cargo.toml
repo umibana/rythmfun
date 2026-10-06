@@ -16,7 +16,7 @@ serde_json = "1"
 web-sys = { version = "0.3", features = [
     "Window", "Navigator", "Gamepad", "GamepadButton", "Storage", "Element",
     "HtmlInputElement", "File", "FileList", "KeyboardEvent",
-    "ScrollIntoViewOptions", "ScrollBehavior", "ScrollLogicalPosition",
+    "Document", "ScrollIntoViewOptions", "ScrollBehavior", "ScrollLogicalPosition",
 ] }
 
 [workspace]
