@@ -73,18 +73,21 @@ UI only consumes `Action`. Sources feed one shared signal:
 
 ## Sound
 
-Sounds from snd.dev (kit SND01 "sine"), bundled as audio files under `public/sounds/`
-(offline app — no CDN). Played with `HtmlAudioElement`, no JS library.
+Generative UI sounds with Foley (`@foleyjs/core` 2.9.0, MIT, single 41 KB ES module,
+no deps, Web Audio synthesis — no audio files). Vendored as `public/vendor/foley.js`
+(license header kept) and imported via `#[wasm_bindgen(module = "/public/vendor/foley.js")]`
+binding only `play(name, opts)`. Offline-safe, repo-safe.
 
-| Event | Sound |
-|---|---|
-| Left/Right move | tap / select |
-| Confirm | button |
-| Back | back / cancel-style tap |
-| Launch game | transition |
+| Event | Cue | Extra |
+|---|---|---|
+| Left/Right move | `tick` | `pan` = card position (-1..1) |
+| Confirm | `press` | |
+| Back | `release` | |
+| Launch game | `whoosh` | |
 
-License: free for commercial/non-commercial, attribution appreciated, no redistribution of
-raw assets → keep repo private or document source; add attribution in Settings.
+Autoplay: AudioContext needs a user gesture; gamepad/HID input does not count. Tauri:
+set WebView2 `additionalBrowserArgs` with `--autoplay-policy=no-user-gesture-required`.
+Browser dev: first key press/click unlocks audio.
 
 ## Testing
 
