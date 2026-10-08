@@ -290,6 +290,9 @@ fn Settings(
             <h2>"Tarjetas (Aime)"</h2>
             <CardManager status/>
 
+            <h2>"Sistema"</h2>
+            <SystemPrefs status/>
+
             <h2>"Fondo de pantalla"</h2>
             <Wallpaper wallpaper status/>
 
@@ -416,6 +419,45 @@ fn GameOptions(g: RwSignal<Game>) -> impl IntoView {
                 </label>
             </div>
         </details>
+    }
+}
+
+#[component]
+fn SystemPrefs(status: RwSignal<Option<(String, bool)>>) -> impl IntoView {
+    let prefs = RwSignal::new(None::<backend::Prefs>);
+    spawn_local(async move {
+        match backend::load_prefs().await {
+            Ok(p) => prefs.set(Some(p)),
+            Err(e) => status.set(Some((format!("No se pudieron cargar las preferencias: {e}"), true))),
+        }
+    });
+    let toggle = move |label: &'static str, get: fn(&backend::Prefs) -> bool, set: fn(&mut backend::Prefs, bool)| {
+        view! {
+            <label class="switch">
+                <input
+                    type="checkbox"
+                    prop:checked=move || prefs.with(|p| p.as_ref().is_some_and(get))
+                    prop:disabled=move || prefs.with(Option::is_none)
+                    on:change=move |e| {
+                        let Some(mut p) = prefs.get_untracked() else { return };
+                        set(&mut p, event_target_checked(&e));
+                        prefs.set(Some(p));
+                        spawn_local(async move {
+                            if let Err(e) = backend::save_prefs(p).await {
+                                status.set(Some((format!("No se pudo guardar: {e}"), true)));
+                            }
+                        });
+                    }
+                />
+                {label}
+            </label>
+        }
+    };
+    view! {
+        <div class="prefs">
+            {toggle("Iniciar con Windows", |p| p.autostart, |p, v| p.autostart = v)}
+            {toggle("Siempre encima (excepto mientras se juega)", |p| p.always_on_top, |p, v| p.always_on_top = v)}
+        </div>
     }
 }
 

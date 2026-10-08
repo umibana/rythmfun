@@ -48,6 +48,20 @@ struct Cards {
     cards: Vec<Card>,
 }
 
+/// Launcher-wide switches, set from Settings.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+struct Prefs {
+    autostart: bool,
+    always_on_top: bool,
+}
+
+impl Default for Prefs {
+    fn default() -> Self {
+        Prefs { autostart: true, always_on_top: true }
+    }
+}
+
 fn read_json<T: DeserializeOwned + Default>(file: &Path) -> Result<T, String> {
     match std::fs::read_to_string(file) {
         Ok(s) => serde_json::from_str(&s).map_err(|e| e.to_string()),
@@ -116,6 +130,38 @@ fn save_cards(app: AppHandle, cards: Cards) -> Result<(), String> {
     write_json(&config_file(&app, "cards.json")?, &cards)
 }
 
+fn load_prefs_file(app: &AppHandle) -> Prefs {
+    config_file(app, "prefs.json").and_then(|f| read_json(&f)).unwrap_or_default()
+}
+
+fn apply_prefs(app: &AppHandle, p: Prefs) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("main") {
+        w.set_always_on_top(p.always_on_top).map_err(|e| e.to_string())?;
+    }
+    // Release only: dev builds would register target/debug as the startup program.
+    #[cfg(not(debug_assertions))]
+    {
+        use tauri_plugin_autostart::ManagerExt;
+        let auto = app.autolaunch();
+        if auto.is_enabled().unwrap_or(false) != p.autostart {
+            let r = if p.autostart { auto.enable() } else { auto.disable() };
+            r.map_err(|e| format!("Inicio con Windows: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn load_prefs(app: AppHandle) -> Prefs {
+    load_prefs_file(&app)
+}
+
+#[tauri::command]
+fn save_prefs(app: AppHandle, prefs: Prefs) -> Result<(), String> {
+    write_json(&config_file(&app, "prefs.json")?, &prefs)?;
+    apply_prefs(&app, prefs)
+}
+
 fn valid_card_number(n: &str) -> bool {
     n.len() == 20 && n.bytes().all(|b| b.is_ascii_digit())
 }
@@ -137,6 +183,7 @@ fn write_card(app: &AppHandle, game: &Game) -> Result<(), String> {
 
 /// Mode to request, given the current one (`w`, `h`, orientation 0..=3 as in DEVMODE) and the game's wish.
 /// DEVMODE wants width/height as seen after rotation, so odd orientations swap them.
+#[cfg_attr(not(windows), allow(dead_code))] // used by win.rs and tests
 fn target_mode((cw, ch, co): (u32, u32, u32), d: &Display) -> (u32, u32, u32) {
     let native = if co % 2 == 1 { (ch, cw) } else { (cw, ch) };
     let (w, h) = if d.width > 0 && d.height > 0 { (d.width, d.height) } else { native };
@@ -189,7 +236,7 @@ async fn launch(app: AppHandle, window: WebviewWindow, game: Game) -> Result<(),
     }
     let _ = window.set_always_on_top(false);
     let res = tauri::async_runtime::spawn_blocking(move || play(&app, &game)).await.map_err(|e| e.to_string()).and_then(|r| r);
-    let _ = window.set_always_on_top(true);
+    let _ = window.set_always_on_top(load_prefs_file(window.app_handle()).always_on_top);
     let _ = window.set_focus();
     PLAYING.store(false, Ordering::SeqCst);
     res
@@ -215,13 +262,8 @@ pub fn run() {
             // A crash mid-game leaves the game's display mode on; undo it.
             #[cfg(windows)]
             win::restore_display(&config_file(app.handle(), "display-changed")?);
-            // Release only: dev builds would register target/debug as the startup program.
-            #[cfg(not(debug_assertions))]
-            {
-                use tauri_plugin_autostart::ManagerExt;
-                if let Err(e) = app.autolaunch().enable() {
-                    eprintln!("autostart: {e}");
-                }
+            if let Err(e) = apply_prefs(app.handle(), load_prefs_file(app.handle())) {
+                eprintln!("prefs: {e}");
             }
             Ok(())
         })
@@ -230,6 +272,8 @@ pub fn run() {
             save_games,
             load_cards,
             save_cards,
+            load_prefs,
+            save_prefs,
             load_wallpaper,
             save_wallpaper,
             launch,

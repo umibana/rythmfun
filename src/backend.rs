@@ -152,6 +152,44 @@ pub async fn launch(game: &Game) -> Result<(), String> {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Prefs {
+    pub autostart: bool,
+    pub always_on_top: bool,
+}
+
+impl Default for Prefs {
+    fn default() -> Self {
+        Prefs { autostart: true, always_on_top: true }
+    }
+}
+
+const PREFS_KEY: &str = "prefs";
+
+pub async fn load_prefs() -> Result<Prefs, String> {
+    if is_tauri() {
+        let v = call("load_prefs", NoArgs {}).await?;
+        serde_wasm_bindgen::from_value(v).map_err(|e| e.to_string())
+    } else {
+        Ok(storage().get_item(PREFS_KEY).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default())
+    }
+}
+
+/// Saves and applies (window always-on-top, Windows startup entry). Browser dev only stores them.
+pub async fn save_prefs(prefs: Prefs) -> Result<(), String> {
+    if is_tauri() {
+        #[derive(Serialize)]
+        struct Args {
+            prefs: Prefs,
+        }
+        call("save_prefs", Args { prefs }).await.map(|_| ())
+    } else {
+        let json = serde_json::to_string(&prefs).map_err(|e| e.to_string())?;
+        storage().set_item(PREFS_KEY, &json).map_err(js_err)
+    }
+}
+
 const CARDS_KEY: &str = "cards";
 
 pub async fn load_cards() -> Result<Cards, String> {
