@@ -5,8 +5,27 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Manager, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 
+#[path = "../../src/controller_binding.rs"]
+mod controller_binding;
+
 #[cfg(windows)]
 mod win;
+#[cfg(windows)]
+mod controller;
+#[cfg(windows)]
+mod controller_profile;
+#[cfg(windows)]
+mod controller_usb;
+#[cfg(windows)]
+mod controller_hid;
+
+#[tauri::command]
+fn controller_snapshot(app: AppHandle) -> serde_json::Value {
+    #[cfg(windows)]
+    { serde_json::to_value(app.state::<controller::Controller>().snapshot()).unwrap_or_default() }
+    #[cfg(not(windows))]
+    { let _ = app; serde_json::json!({ "device": null, "raw": [], "actions": [], "status": "Entrada nativa disponible en Windows" }) }
+}
 
 /// Display mode for a game. Zero / `None` keeps the current value.
 /// `width`×`height` is the unrotated mode (e.g. 1920×1080); rotation is in degrees.
@@ -31,6 +50,7 @@ struct Game {
     /// Where segatools reads the card number (`[aime] aimePath`); relative to the game folder.
     aime_path: String,
     display: Display,
+    controller: Option<controller_binding::ControllerBinding>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -207,7 +227,7 @@ fn run_script(path: &str, when: &str) -> Result<(), String> {
 #[cfg(windows)]
 fn run_game(app: &AppHandle, game: &Game) -> Result<(), String> {
     let _display = win::apply_display(&game.display, &config_file(app, "display-changed")?)?;
-    win::run_and_wait(&game.path)
+    win::run_and_wait(&game.path, &app.state::<controller::Controller>().stop_requested)
 } // _display restores the mode here, even if the game failed to start.
 
 /// Dev on macOS/Linux: just open it, no waiting or display changes.
@@ -235,7 +255,13 @@ async fn launch(app: AppHandle, window: WebviewWindow, game: Game) -> Result<(),
         return Err("Ya hay un juego en curso".into());
     }
     let _ = window.set_always_on_top(false);
-    let res = tauri::async_runtime::spawn_blocking(move || play(&app, &game)).await.map_err(|e| e.to_string()).and_then(|r| r);
+    let res = tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(windows)]
+        let controller = app.state::<controller::Controller>();
+        #[cfg(windows)]
+        let _suspension = controller.suspend()?;
+        play(&app, &game)
+    }).await.map_err(|e| e.to_string()).and_then(|r| r);
     let _ = window.set_always_on_top(load_prefs_file(window.app_handle()).always_on_top);
     let _ = window.set_focus();
     PLAYING.store(false, Ordering::SeqCst);
@@ -259,6 +285,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .setup(|app| {
+            #[cfg(windows)]
+            app.manage(controller::Controller::new()?);
             // A crash mid-game leaves the game's display mode on; undo it.
             #[cfg(windows)]
             win::restore_display(&config_file(app.handle(), "display-changed")?);
@@ -268,6 +296,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            controller_snapshot,
             load_games,
             save_games,
             load_cards,
@@ -307,6 +336,16 @@ mod tests {
     fn old_games_json_still_loads() {
         let g: Vec<Game> = serde_json::from_str(r#"[{"name":"a","path":"b","image":""}]"#).unwrap();
         assert_eq!(g[0].display, Display::default());
+        assert_eq!(g[0].controller, None);
+    }
+
+    #[test]
+    fn controller_association_survives_game_save_and_reload() {
+        let games: Vec<Game> = serde_json::from_str(r#"[{"name":"Chunithm","path":"launch.bat","controller":{"id":"hid:0e8f:1231","name":"TASOLLER PLUS"}}]"#).unwrap();
+        let saved = serde_json::to_string(&games).unwrap();
+        let reloaded: Vec<Game> = serde_json::from_str(&saved).unwrap();
+        assert_eq!(reloaded, games);
+        assert_eq!(reloaded[0].controller.as_ref().unwrap().id, "hid:0e8f:1231");
     }
 
     #[test]

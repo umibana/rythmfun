@@ -1,9 +1,10 @@
 use crate::backend::js_err;
 use crate::hid_profile::{pressed, profile};
 use crate::nav::Action;
+use crate::controller_binding::ControllerBinding;
 use leptos::{ev, prelude::*};
 use serde::Deserialize;
-use std::{cell::RefCell, collections::HashMap, time::Duration};
+use std::{cell::RefCell, collections::HashMap, rc::Rc, time::Duration};
 use wasm_bindgen::prelude::*;
 use web_sys::KeyboardEvent;
 
@@ -29,7 +30,7 @@ pub fn keyboard(on: impl Fn(Action) + 'static) {
             "ArrowLeft" => Action::Left,
             "ArrowRight" => Action::Right,
             "Enter" => Action::Confirm,
-            "Backspace" => Action::Back,
+            "Backspace" | "Escape" => Action::Back,
             _ => return,
         };
         // A focused button handles Enter natively (click).
@@ -48,11 +49,17 @@ pub fn keyboard(on: impl Fn(Action) + 'static) {
 
 /// Standard-mapping gamepads: d-pad/left stick, A = Confirm, B = Back. Fires on press edge.
 // ponytail: no hold-to-repeat; add if scrolling long lists by holding feels needed.
-pub fn gamepad(on: impl Fn(Action) + 'static) {
+pub fn gamepad(on: impl Fn(Action) + 'static, on_devices: impl Fn(Vec<ControllerBinding>) + 'static) {
     const ORDER: [Action; 4] = [Action::Left, Action::Right, Action::Confirm, Action::Back];
     let prev = RefCell::new([false; 4]);
+    let devices = RefCell::new(Vec::new());
     set_interval(
         move || {
+            let connected = gamepad_devices();
+            if *devices.borrow() != connected {
+                *devices.borrow_mut() = connected.clone();
+                on_devices(connected);
+            }
             let now = read_gamepads();
             let was = prev.replace(now);
             for i in 0..4 {
@@ -63,6 +70,18 @@ pub fn gamepad(on: impl Fn(Action) + 'static) {
         },
         GAMEPAD_POLL,
     );
+}
+
+fn gamepad_devices() -> Vec<ControllerBinding> {
+    let mut devices = Vec::new();
+    if let Ok(pads) = window().navigator().get_gamepads() {
+        for p in pads.iter().filter_map(|p| p.dyn_into::<web_sys::Gamepad>().ok()) {
+            if !p.connected() { continue; }
+            let binding = ControllerBinding { id: format!("gamepad:{}", p.id()), name: p.id() };
+            if !devices.contains(&binding) { devices.push(binding); }
+        }
+    }
+    devices
 }
 
 fn read_gamepads() -> [bool; 4] {
@@ -88,7 +107,7 @@ fn read_gamepads() -> [bool; 4] {
     s
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HidInfo {
     pub vendor_id: u16,
@@ -99,12 +118,16 @@ pub struct HidInfo {
 #[wasm_bindgen(module = "/src/js/platform.js")]
 extern "C" {
     #[wasm_bindgen(catch, js_name = hidOpen)]
-    async fn hid_open(ask: bool, on_report: &JsValue) -> Result<JsValue, JsValue>;
+    async fn hid_open(ask: bool, on_report: &JsValue, on_action: &JsValue, on_device: &JsValue, on_status: &JsValue) -> Result<JsValue, JsValue>;
 }
 
-/// Open Yuancon HID devices. `ask` shows the chooser (needs a click); otherwise reopens granted ones.
+/// Desktop uses native input. Browser dev uses granted Yuancon WebHID devices.
 /// `on_raw` gets every report as hex, for building profiles.
-pub async fn hid(ask: bool, on: impl Fn(Action) + 'static, on_raw: impl Fn(String) + 'static) -> Result<Option<HidInfo>, String> {
+pub async fn hid(ask: bool, on: impl Fn(Action) + 'static, on_raw: impl Fn(String) + 'static,
+    on_device: impl Fn(Vec<HidInfo>) + 'static, on_status: impl Fn(String) + 'static,
+) -> Result<Option<HidInfo>, String> {
+    let on = Rc::new(on);
+    let on_native = on.clone();
     let prev = RefCell::new(HashMap::<(u16, u16, u8), Vec<u8>>::new());
     let cb = Closure::<dyn Fn(u16, u16, u8, js_sys::Uint8Array)>::new(move |vid, pid, rid, data: js_sys::Uint8Array| {
         let now = data.to_vec();
@@ -121,6 +144,21 @@ pub async fn hid(ask: bool, on: impl Fn(Action) + 'static, on_raw: impl Fn(Strin
         *last = now;
     })
     .into_js_value();
-    let v = hid_open(ask, &cb).await.map_err(js_err)?;
+    let action_cb = Closure::<dyn Fn(String)>::new(move |action: String| {
+        let action = match action.as_str() {
+            "left" => Action::Left, "right" => Action::Right,
+            "back" => Action::Back, "confirm" => Action::Confirm,
+            _ => return,
+        };
+        on_native(action);
+    }).into_js_value();
+    let device_cb = Closure::<dyn Fn(JsValue)>::new(move |device: JsValue| {
+        // Browser WebHID reports all devices; native WinUSB currently reports one.
+        let devices = serde_wasm_bindgen::from_value::<Vec<HidInfo>>(device.clone())
+            .unwrap_or_else(|_| serde_wasm_bindgen::from_value::<Option<HidInfo>>(device).ok().flatten().into_iter().collect());
+        on_device(devices);
+    }).into_js_value();
+    let status_cb = Closure::<dyn Fn(String)>::new(move |status: String| on_status(status)).into_js_value();
+    let v = hid_open(ask, &cb, &action_cb, &device_cb, &status_cb).await.map_err(js_err)?;
     Ok(serde_wasm_bindgen::from_value(v).ok())
 }

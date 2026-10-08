@@ -1,5 +1,7 @@
 mod app;
 mod backend;
+mod controller_binding;
+mod game_priority;
 mod hid_profile;
 mod input;
 mod nav;

@@ -21,6 +21,7 @@ pub struct Game {
     pub post: String,
     pub aime_path: String,
     pub display: Display,
+    pub controller: Option<crate::controller_binding::ControllerBinding>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

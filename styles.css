@@ -201,6 +201,26 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--text); outl
 }
 .keys { display: flex; gap: 1.25rem; }
 .hint { display: inline-flex; align-items: center; gap: 0.45rem; color: var(--text); }
+.hints.tasoller { display: block; }
+.hints.tasoller .device { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; }
+.hints.tasoller .keys { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.4rem; }
+.hints.tasoller .hint {
+  justify-content: center;
+  padding: 0.65rem 0.25rem;
+  background: var(--glass-strong);
+  border-bottom: 4px solid var(--pad-color);
+  border-radius: 8px;
+  color: var(--pad-color);
+}
+.pad-left { --pad-color: #ffff00; }
+.pad-right { --pad-color: #ff8020; }
+.pad-back { --pad-color: #a040b0; }
+.pad-confirm { --pad-color: #ffa0c0; }
+.hints.tasoller kbd { background: var(--pad-color); }
+@media (max-width: 540px) {
+  .hints.tasoller { font-size: 0.75rem; padding-inline: 0.5rem; }
+  .hints.tasoller .hint { flex-direction: column; }
+}
 kbd {
   font: 800 0.8rem/1 "M PLUS Rounded 1c", sans-serif;
   min-width: 1.8rem;
@@ -301,5 +321,22 @@ kbd {
   .options { margin-left: 0; }
 }
 .prefs { display: flex; flex-direction: column; gap: 0.6rem; }
+.controller-choice { display: flex; align-items: center; gap: 0.75rem; margin: 1rem 0 0; }
+.dialog-overlay {
+  position: fixed; inset: 0; z-index: 10;
+  display: grid; place-items: center;
+  background: rgb(0 0 0 / 0.7); backdrop-filter: blur(8px);
+  padding: 1.5rem;
+}
+.launch-dialog {
+  width: min(100%, 32rem); padding: 1.75rem;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 18px;
+  box-shadow: 0 20px 70px rgb(0 0 0 / 0.55);
+}
+.launch-dialog h2 { margin: 0 0 1rem; font-size: 1.4rem; }
+.dialog-actions { display: flex; gap: 0.75rem; margin-top: 1.5rem; }
+.dialog-actions button { flex: 1; }
+.dialog-actions .chosen { background: var(--text); color: var(--bg); }
+.launch-dialog .note { font-size: 0.8rem; color: var(--muted); margin-bottom: 0; }
 .switch { display: flex; align-items: center; gap: 0.6rem; cursor: pointer; width: fit-content; }
 .switch input { width: 1.1rem; height: 1.1rem; accent-color: var(--text); }

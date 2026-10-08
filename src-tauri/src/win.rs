@@ -8,13 +8,14 @@ use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
 use windows_sys::Win32::Graphics::Gdi::{
     ChangeDisplaySettingsExW, EnumDisplaySettingsW, DEVMODEW, DISP_CHANGE_SUCCESSFUL, DM_DISPLAYFREQUENCY,
     DM_DISPLAYORIENTATION, DM_PELSHEIGHT, DM_PELSWIDTH, ENUM_CURRENT_SETTINGS,
 };
 use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicAccountingInformation, QueryInformationJobObject,
+    AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicAccountingInformation, QueryInformationJobObject, TerminateJobObject,
     JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
 };
 use windows_sys::Win32::System::Threading::{
@@ -60,7 +61,7 @@ impl Drop for Handle {
 /// Starts the game inside a Job Object and blocks until every process it spawned has exited.
 /// `.bat`/`.lnk` hand off to other processes and exit early; children inherit the job, so we still see them.
 /// Processes that elevate through UAC leave the job: run the launcher as admin if games need it.
-pub fn run_and_wait(path: &str) -> Result<(), String> {
+pub fn run_and_wait(path: &str, stop_requested: &AtomicBool) -> Result<(), String> {
     let job = unsafe { CreateJobObjectW(null(), null()) };
     if job.is_null() {
         return Err(last_error());
@@ -98,8 +99,11 @@ pub fn run_and_wait(path: &str) -> Result<(), String> {
     }
     unsafe { ResumeThread(thread.0) };
 
-    // ponytail: 500 ms poll; an IO completion port (JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO) if exit latency matters.
+    // Poll stop requests and job completion independently of WebView focus/timers.
     loop {
+        if stop_requested.swap(false, Ordering::SeqCst) && unsafe { TerminateJobObject(job.0, 0) } == 0 {
+            return Err(last_error());
+        }
         let mut info: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = unsafe { zeroed() };
         let ok = unsafe {
             QueryInformationJobObject(
@@ -116,7 +120,7 @@ pub fn run_and_wait(path: &str) -> Result<(), String> {
         if info.ActiveProcesses == 0 {
             return Ok(());
         }
-        std::thread::sleep(Duration::from_millis(500));
+        std::thread::sleep(Duration::from_millis(50));
     }
 }
 
