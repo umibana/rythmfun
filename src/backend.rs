@@ -1,11 +1,57 @@
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
+/// Display mode for a game. Zero / `None` keeps the current value (see the backend for details).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Display {
+    pub width: u32,
+    pub height: u32,
+    pub hz: u32,
+    pub rotation: Option<u32>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Game {
     pub name: String,
     pub path: String,
     pub image: String,
+    pub pre: String,
+    pub post: String,
+    pub aime_path: String,
+    pub display: Display,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Card {
+    pub id: String,
+    pub name: String,
+    pub number: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Cards {
+    pub active: String,
+    pub cards: Vec<Card>,
+}
+
+impl Card {
+    /// New card with a random 20-digit access code.
+    pub fn random(name: String) -> Card {
+        let digit = || char::from(b'0' + (js_sys::Math::random() * 10.0) as u8);
+        Card {
+            id: format!("{:x}{:x}", js_sys::Date::now() as u64, (js_sys::Math::random() * 1e9) as u64),
+            name,
+            number: (0..20).map(|_| digit()).collect(),
+        }
+    }
+
+    pub fn is_valid(&self) -> bool {
+        self.number.len() == 20 && self.number.bytes().all(|b| b.is_ascii_digit())
+    }
 }
 
 #[wasm_bindgen]
@@ -74,6 +120,7 @@ fn demo_games() -> Vec<Game> {
         name: name.into(),
         path: format!(r"C:\juegos\{id}.bat"),
         image: format!("assets/demo/{id}.svg"),
+        ..Game::default()
     })
     .collect()
 }
@@ -91,16 +138,41 @@ pub async fn save_games(games: &[Game]) -> Result<(), String> {
     }
 }
 
-pub async fn launch(path: &str) -> Result<(), String> {
+/// Resolves when the game (and its pre/post scripts) has finished.
+pub async fn launch(game: &Game) -> Result<(), String> {
     if is_tauri() {
         #[derive(Serialize)]
         struct Args<'a> {
-            path: &'a str,
+            game: &'a Game,
         }
-        call("launch", Args { path }).await.map(|_| ())
+        call("launch", Args { game }).await.map(|_| ())
     } else {
-        leptos::logging::log!("launch (browser dev, not executed): {path}");
+        leptos::logging::log!("launch (browser dev, not executed): {}", game.path);
         Ok(())
+    }
+}
+
+const CARDS_KEY: &str = "cards";
+
+pub async fn load_cards() -> Result<Cards, String> {
+    if is_tauri() {
+        let v = call("load_cards", NoArgs {}).await?;
+        serde_wasm_bindgen::from_value(v).map_err(|e| e.to_string())
+    } else {
+        Ok(storage().get_item(CARDS_KEY).ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default())
+    }
+}
+
+pub async fn save_cards(cards: &Cards) -> Result<(), String> {
+    if is_tauri() {
+        #[derive(Serialize)]
+        struct Args<'a> {
+            cards: &'a Cards,
+        }
+        call("save_cards", Args { cards }).await.map(|_| ())
+    } else {
+        let json = serde_json::to_string(cards).map_err(|e| e.to_string())?;
+        storage().set_item(CARDS_KEY, &json).map_err(js_err)
     }
 }
 

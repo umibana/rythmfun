@@ -1,4 +1,4 @@
-use crate::backend::{self, Game};
+use crate::backend::{self, Card, Cards, Display, Game};
 use crate::input;
 use crate::nav::{Action, Nav, Outcome, Tab, Zone};
 use crate::sound;
@@ -14,6 +14,7 @@ pub fn App() -> impl IntoView {
     let hid_name = RwSignal::new(None::<String>);
     let hid_raw = RwSignal::new(String::new());
     let launching = RwSignal::new(None::<usize>);
+    let playing = RwSignal::new(false);
     let wallpaper = RwSignal::new(None::<String>);
     spawn_local(async move {
         if let Ok(w) = backend::load_wallpaper().await {
@@ -47,16 +48,21 @@ pub fn App() -> impl IntoView {
             Outcome::Moved => sound::play("tick", if next.zone == Zone::Bar { 0.0 } else { pan }),
             Outcome::Confirmed => sound::play("press", 0.0),
             Outcome::Back => sound::play("release", 0.0),
+            Outcome::Launch(_) if playing.get_untracked() => {}
             Outcome::Launch(i) => {
                 sound::play("whoosh", pan);
                 launching.set(Some(i));
                 set_timeout(move || launching.set(None), Duration::from_millis(450));
-                let (name, path) = games.with_untracked(|g| (g[i].name.clone(), g[i].path.clone()));
-                status.set(Some((format!("Iniciando {name}…"), false)));
+                let game = games.with_untracked(|g| g[i].clone());
+                status.set(Some((format!("Iniciando {}…", game.name), false)));
+                playing.set(true);
                 spawn_local(async move {
-                    if let Err(e) = backend::launch(&path).await {
-                        status.set(Some((format!("No se pudo lanzar: {e}"), true)));
+                    // Resolves once the game has exited.
+                    match backend::launch(&game).await {
+                        Ok(()) => status.set(None),
+                        Err(e) => status.set(Some((format!("{}: {e}", game.name), true))),
                     }
+                    playing.set(false);
                 });
             }
             Outcome::Nothing => {}
@@ -281,6 +287,9 @@ fn Settings(
                 <button on:click=move |_| draft.update(|v| v.push(fresh(Game::default())))>"Agregar juego"</button>
             </div>
 
+            <h2>"Tarjetas (Aime)"</h2>
+            <CardManager status/>
+
             <h2>"Fondo de pantalla"</h2>
             <Wallpaper wallpaper status/>
 
@@ -344,6 +353,149 @@ fn GameRow(id: u32, g: RwSignal<Game>, draft: Draft) -> impl IntoView {
             <button title="Subir" on:click=move |_| shift(-1)>"↑"</button>
             <button title="Bajar" on:click=move |_| shift(1)>"↓"</button>
             <button title="Quitar" on:click=move |_| draft.update(|v| v.retain(|(k, _)| *k != id))>"✕"</button>
+        </div>
+        <GameOptions g/>
+    }
+}
+
+/// Per-game extras: scripts, card file and display mode. Empty / 0 = not used.
+#[component]
+fn GameOptions(g: RwSignal<Game>) -> impl IntoView {
+    let text = move |label: &'static str, hint: &'static str, get: fn(&Game) -> &String, set: fn(&mut Game, String)| {
+        view! {
+            <label>
+                <span>{label}</span>
+                <input
+                    placeholder=hint
+                    prop:value=move || g.with(|g| get(g).clone())
+                    on:input=move |e| g.update(|g| set(g, event_target_value(&e)))
+                />
+            </label>
+        }
+    };
+    let num = move |label: &'static str, get: fn(&Display) -> u32, set: fn(&mut Display, u32)| {
+        view! {
+            <label>
+                <span>{label}</span>
+                <input
+                    type="number"
+                    min="0"
+                    placeholder="actual"
+                    prop:value=move || g.with(|g| match get(&g.display) { 0 => String::new(), n => n.to_string() })
+                    on:input=move |e| g.update(|g| set(&mut g.display, event_target_value(&e).parse().unwrap_or(0)))
+                />
+            </label>
+        }
+    };
+    view! {
+        <details class="options">
+            <summary>"Opciones"</summary>
+            <div class="grid">
+                {text("Script antes", r"C:\juegos\antes.bat", |g| &g.pre, |g, v| g.pre = v)}
+                {text("Script después", r"C:\juegos\despues.bat", |g| &g.post, |g, v| g.post = v)}
+                {text("Archivo de tarjeta", r"DEVICE\aime.txt (relativo al juego)", |g| &g.aime_path, |g, v| g.aime_path = v)}
+            </div>
+            <p class="note">"Pantalla principal mientras se juega. Vacío = no cambiar. Resolución en horizontal (ej. 1920×1080); la rotación la gira."</p>
+            <div class="grid display">
+                {num("Ancho", |d| d.width, |d, v| d.width = v)}
+                {num("Alto", |d| d.height, |d, v| d.height = v)}
+                {num("Hz", |d| d.hz, |d, v| d.hz = v)}
+                <label>
+                    <span>"Orientación"</span>
+                    <select on:change=move |e| g.update(|g| g.display.rotation = event_target_value(&e).parse().ok())>
+                        {[(None, "No cambiar"), (Some(0), "0° horizontal"), (Some(90), "90° vertical"), (Some(180), "180° horizontal invertida"), (Some(270), "270° vertical invertida")]
+                            .into_iter()
+                            .map(|(r, label)| view! {
+                                <option
+                                    value=r.map(|r: u32| r.to_string()).unwrap_or_default()
+                                    selected=move || g.with(|g| g.display.rotation == r)
+                                >{label}</option>
+                            })
+                            .collect_view()}
+                    </select>
+                </label>
+            </div>
+        </details>
+    }
+}
+
+/// Virtual Aime cards. The active one is written to each game's card file right before it starts.
+#[component]
+fn CardManager(status: RwSignal<Option<(String, bool)>>) -> impl IntoView {
+    let rows = RwSignal::new(Vec::<RwSignal<Card>>::new());
+    let active = RwSignal::new(String::new());
+    // Autosave stays off until the file loaded, so a failed read cannot wipe it.
+    let loaded = RwSignal::new(false);
+    spawn_local(async move {
+        match backend::load_cards().await {
+            Ok(c) => {
+                active.set(c.active);
+                rows.set(c.cards.into_iter().map(RwSignal::new).collect());
+                loaded.set(true);
+            }
+            Err(e) => status.set(Some((format!("No se pudieron cargar las tarjetas: {e}"), true))),
+        }
+    });
+    Effect::new(move |_| {
+        if !loaded.get() {
+            return;
+        }
+        let cards = Cards { active: active.get(), cards: rows.with(|v| v.iter().map(|c| c.get()).collect()) };
+        spawn_local(async move {
+            if let Err(e) = backend::save_cards(&cards).await {
+                status.set(Some((format!("No se pudieron guardar las tarjetas: {e}"), true)));
+            }
+        });
+    });
+    let add = move |_| {
+        let card = Card::random(format!("Tarjeta {}", rows.with(Vec::len) + 1));
+        if active.with(String::is_empty) {
+            active.set(card.id.clone());
+        }
+        rows.update(|v| v.push(RwSignal::new(card)));
+    };
+
+    view! {
+        <For each=move || rows.get() key=|c| c.get_untracked().id let(c)>
+            {
+                let id = c.get_untracked().id;
+                let id_active = id.clone();
+                let id_remove = id.clone();
+                view! {
+                    <div class="row card-row" class:active=move || active.with(|a| *a == id)>
+                        <input
+                            type="radio"
+                            name="active-card"
+                            title="Usar esta tarjeta"
+                            prop:checked={let id = id_active.clone(); move || active.with(|a| *a == id)}
+                            on:change=move |_| active.set(id_active.clone())
+                        />
+                        <input
+                            placeholder="Nombre"
+                            prop:value=move || c.with(|c| c.name.clone())
+                            on:input=move |e| c.update(|c| c.name = event_target_value(&e))
+                        />
+                        <input
+                            class="path number"
+                            class:invalid=move || !c.with(Card::is_valid)
+                            inputmode="numeric"
+                            maxlength="20"
+                            placeholder="20 dígitos"
+                            prop:value=move || c.with(|c| c.number.clone())
+                            on:input=move |e| c.update(|c| c.number = event_target_value(&e).chars().filter(char::is_ascii_digit).collect())
+                        />
+                        <button title="Quitar" on:click=move |_| {
+                            rows.update(|v| v.retain(|r| r.get_untracked().id != id_remove));
+                            if active.get_untracked() == id_remove {
+                                active.set(rows.with_untracked(|v| v.first().map(|r| r.get_untracked().id).unwrap_or_default()));
+                            }
+                        }>"✕"</button>
+                    </div>
+                }
+            }
+        </For>
+        <div class="actions">
+            <button on:click=add>"Agregar tarjeta"</button>
         </div>
     }
 }

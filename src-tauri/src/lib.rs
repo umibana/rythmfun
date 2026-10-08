@@ -1,40 +1,77 @@
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager};
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::{AppHandle, Manager, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg(windows)]
+mod win;
+
+/// Display mode for a game. Zero / `None` keeps the current value.
+/// `width`×`height` is the unrotated mode (e.g. 1920×1080); rotation is in degrees.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+struct Display {
+    width: u32,
+    height: u32,
+    hz: u32,
+    rotation: Option<u32>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 struct Game {
     name: String,
     path: String,
     image: String,
+    /// Scripts run (and waited for) before / after the game.
+    pre: String,
+    post: String,
+    /// Where segatools reads the card number (`[aime] aimePath`); relative to the game folder.
+    aime_path: String,
+    display: Display,
 }
 
-fn read_games(file: &Path) -> Result<Vec<Game>, String> {
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+struct Card {
+    id: String,
+    name: String,
+    number: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+struct Cards {
+    active: String,
+    cards: Vec<Card>,
+}
+
+fn read_json<T: DeserializeOwned + Default>(file: &Path) -> Result<T, String> {
     match std::fs::read_to_string(file) {
         Ok(s) => serde_json::from_str(&s).map_err(|e| e.to_string()),
-        Err(e) if e.kind() == ErrorKind::NotFound => Ok(vec![]),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(T::default()),
         Err(e) => Err(e.to_string()),
     }
 }
 
-/// Write to a temp file then rename, so a crash mid-write never truncates the list.
-fn write_games(file: &Path, games: &[Game]) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(games).map_err(|e| e.to_string())?;
-    let tmp = file.with_extension("json.tmp");
-    std::fs::write(&tmp, json).map_err(|e| e.to_string())?;
+/// Write to a temp file then rename, so a crash mid-write never truncates the file.
+fn write_atomic(file: &Path, contents: impl AsRef<[u8]>) -> Result<(), String> {
+    let mut tmp = file.as_os_str().to_owned();
+    tmp.push(".tmp");
+    std::fs::write(&tmp, contents).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, file).map_err(|e| e.to_string())
+}
+
+fn write_json<T: Serialize>(file: &Path, value: &T) -> Result<(), String> {
+    write_atomic(file, serde_json::to_string_pretty(value).map_err(|e| e.to_string())?)
 }
 
 fn config_file(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
     let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join(name))
-}
-
-fn games_file(app: &AppHandle) -> Result<PathBuf, String> {
-    config_file(app, "games.json")
 }
 
 /// Wallpaper is kept as a data URL in its own file so games.json stays small.
@@ -61,36 +98,101 @@ fn save_wallpaper(app: AppHandle, wallpaper: Option<String>) -> Result<(), Strin
 
 #[tauri::command]
 fn load_games(app: AppHandle) -> Result<Vec<Game>, String> {
-    read_games(&games_file(&app)?)
+    read_json(&config_file(&app, "games.json")?)
 }
 
 #[tauri::command]
 fn save_games(app: AppHandle, games: Vec<Game>) -> Result<(), String> {
-    write_games(&games_file(&app)?, &games)
+    write_json(&config_file(&app, "games.json")?, &games)
 }
 
-/// Runs a .bat/.lnk/.exe from its own folder (game scripts usually use relative paths).
+#[tauri::command]
+fn load_cards(app: AppHandle) -> Result<Cards, String> {
+    read_json(&config_file(&app, "cards.json")?)
+}
+
+#[tauri::command]
+fn save_cards(app: AppHandle, cards: Cards) -> Result<(), String> {
+    write_json(&config_file(&app, "cards.json")?, &cards)
+}
+
+fn valid_card_number(n: &str) -> bool {
+    n.len() == 20 && n.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Writes the active card to the game's aime.txt. No path or no active card: nothing to do.
+fn write_card(app: &AppHandle, game: &Game) -> Result<(), String> {
+    if game.aime_path.is_empty() {
+        return Ok(());
+    }
+    let cards: Cards = read_json(&config_file(app, "cards.json")?)?;
+    let Some(card) = cards.cards.iter().find(|c| c.id == cards.active) else { return Ok(()) };
+    if !valid_card_number(&card.number) {
+        return Err(format!("La tarjeta «{}» no tiene 20 dígitos", card.name));
+    }
+    // `join` keeps an absolute aime_path as is.
+    let file = Path::new(&game.path).parent().unwrap_or(Path::new("")).join(&game.aime_path);
+    write_atomic(&file, format!("{}\n", card.number)).map_err(|e| format!("No se pudo escribir {}: {e}", file.display()))
+}
+
+/// Mode to request, given the current one (`w`, `h`, orientation 0..=3 as in DEVMODE) and the game's wish.
+/// DEVMODE wants width/height as seen after rotation, so odd orientations swap them.
+fn target_mode((cw, ch, co): (u32, u32, u32), d: &Display) -> (u32, u32, u32) {
+    let native = if co % 2 == 1 { (ch, cw) } else { (cw, ch) };
+    let (w, h) = if d.width > 0 && d.height > 0 { (d.width, d.height) } else { native };
+    let o = d.rotation.map_or(co, |r| r / 90 % 4);
+    if o % 2 == 1 { (h, w, o) } else { (w, h, o) }
+}
+
+fn run_script(path: &str, when: &str) -> Result<(), String> {
+    if path.is_empty() {
+        return Ok(());
+    }
+    #[cfg(windows)]
+    let r = win::run_script(path);
+    #[cfg(not(windows))]
+    let r = std::process::Command::new("sh").arg(path).status().map_err(|e| e.to_string()).and_then(|s| {
+        if s.success() { Ok(()) } else { Err(format!("terminó con {s}")) }
+    });
+    r.map_err(|e| format!("Script {when}: {e}"))
+}
+
 #[cfg(windows)]
-#[tauri::command]
-fn launch(path: String) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let dir = Path::new(&path).parent().ok_or("ruta inválida")?;
-    // ponytail: paths containing `"` or `&` break cmd quoting; use ShellExecuteW if that ever matters.
-    std::process::Command::new("cmd")
-        .raw_arg(format!("/C start \"\" \"{path}\""))
-        .current_dir(dir)
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+fn run_game(app: &AppHandle, game: &Game) -> Result<(), String> {
+    let _display = win::apply_display(&game.display, &config_file(app, "display-changed")?)?;
+    win::run_and_wait(&game.path)
+} // _display restores the mode here, even if the game failed to start.
+
+/// Dev on macOS/Linux: just open it, no waiting or display changes.
+#[cfg(not(windows))]
+fn run_game(app: &AppHandle, game: &Game) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener().open_path(&game.path, None::<&str>).map_err(|e| e.to_string())
 }
 
-#[cfg(not(windows))]
+/// card → pre script → display mode → game (until its whole process tree exits) → restore display → post script.
+fn play(app: &AppHandle, game: &Game) -> Result<(), String> {
+    write_card(app, game)?;
+    run_script(&game.pre, "antes")?;
+    let played = run_game(app, game);
+    let post = run_script(&game.post, "después");
+    played.and(post)
+}
+
+static PLAYING: AtomicBool = AtomicBool::new(false);
+
+/// Resolves when the game has exited, so the UI knows the launcher is back.
 #[tauri::command]
-fn launch(app: AppHandle, path: String) -> Result<(), String> {
-    use tauri_plugin_opener::OpenerExt;
-    app.opener().open_path(path, None::<&str>).map_err(|e| e.to_string())
+async fn launch(app: AppHandle, window: WebviewWindow, game: Game) -> Result<(), String> {
+    if PLAYING.swap(true, Ordering::SeqCst) {
+        return Err("Ya hay un juego en curso".into());
+    }
+    let _ = window.set_always_on_top(false);
+    let res = tauri::async_runtime::spawn_blocking(move || play(&app, &game)).await.map_err(|e| e.to_string()).and_then(|r| r);
+    let _ = window.set_always_on_top(true);
+    let _ = window.set_focus();
+    PLAYING.store(false, Ordering::SeqCst);
+    res
 }
 
 #[tauri::command]
@@ -108,7 +210,31 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![load_games, save_games, load_wallpaper, save_wallpaper, launch, pick_game_path])
+        .plugin(tauri_plugin_autostart::Builder::new().build())
+        .setup(|app| {
+            // A crash mid-game leaves the game's display mode on; undo it.
+            #[cfg(windows)]
+            win::restore_display(&config_file(app.handle(), "display-changed")?);
+            // Release only: dev builds would register target/debug as the startup program.
+            #[cfg(not(debug_assertions))]
+            {
+                use tauri_plugin_autostart::ManagerExt;
+                if let Err(e) = app.autolaunch().enable() {
+                    eprintln!("autostart: {e}");
+                }
+            }
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            load_games,
+            save_games,
+            load_cards,
+            save_cards,
+            load_wallpaper,
+            save_wallpaper,
+            launch,
+            pick_game_path
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -124,12 +250,39 @@ mod tests {
         let file = dir.join("games.json");
         let _ = std::fs::remove_file(&file);
 
-        assert_eq!(read_games(&file).unwrap(), vec![]);
+        assert_eq!(read_json::<Vec<Game>>(&file).unwrap(), vec![]);
 
-        let games = vec![Game { name: "osu".into(), path: r"C:\games\osu.lnk".into(), image: "data:image/png;base64,AA==".into() }];
-        write_games(&file, &games).unwrap();
-        assert_eq!(read_games(&file).unwrap(), games);
+        let games = vec![Game { name: "osu".into(), path: r"C:\games\osu.lnk".into(), image: "data:image/png;base64,AA==".into(), ..Game::default() }];
+        write_json(&file, &games).unwrap();
+        assert_eq!(read_json::<Vec<Game>>(&file).unwrap(), games);
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn old_games_json_still_loads() {
+        let g: Vec<Game> = serde_json::from_str(r#"[{"name":"a","path":"b","image":""}]"#).unwrap();
+        assert_eq!(g[0].display, Display::default());
+    }
+
+    #[test]
+    fn card_number_needs_20_digits() {
+        assert!(valid_card_number("01234567890123456789"));
+        assert!(!valid_card_number("0123456789012345678"));
+        assert!(!valid_card_number("0123456789012345678x"));
+    }
+
+    #[test]
+    fn target_mode_swaps_for_portrait() {
+        let keep = Display::default();
+        let portrait = Display { rotation: Some(90), ..keep };
+        let res = Display { width: 1280, height: 720, ..keep };
+        // landscape 1920x1080 → portrait keeps the panel mode, swapped for DEVMODE
+        assert_eq!(target_mode((1920, 1080, 0), &portrait), (1080, 1920, 1));
+        // already portrait, only resolution changes: stays portrait
+        assert_eq!(target_mode((1080, 1920, 1), &res), (720, 1280, 1));
+        // back to landscape from portrait
+        assert_eq!(target_mode((1080, 1920, 3), &Display { rotation: Some(0), ..keep }), (1920, 1080, 0));
+        assert_eq!(target_mode((1920, 1080, 0), &keep), (1920, 1080, 0));
     }
 }

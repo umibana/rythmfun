@@ -16,7 +16,8 @@
         "title": "Rythm Fun Launcher",
         "width": 1280,
         "height": 720,
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required"
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required",
+        "alwaysOnTop": true
       }
     ],
     "security": {

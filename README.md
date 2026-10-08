@@ -13,9 +13,22 @@ Switch-style game launcher (Tauri 2 + Leptos) for rhythm-game cabinets. It runs 
 - Gamepad: d-pad or stick to move, A confirm, B back.
 - Yuancon controller via WebHID: press "Conectar controlador HID" in Settings. Raw reports are shown there so you can add bindings in `src/hid_profile.rs`.
 
+## Launching (Windows)
+
+Pressing a game runs, in order:
+
+1. Writes the active Aime card to the game's card file (`[aime] aimePath` in its `segatools.ini`, relative to the game folder).
+2. Runs the "before" script and waits for it.
+3. Changes the primary display (resolution, Hz, rotation) if the game has one set. The change is not saved to the registry, so a reboot always undoes it; a crash is undone on the next launcher start.
+4. Starts the `.bat`/`.lnk`/`.exe` inside a Job Object and waits until every process it spawned exits.
+5. Restores the display, then runs the "after" script.
+
+The launcher stays always-on-top except while a game runs. Release builds register themselves to start with Windows.
+Processes that elevate through UAC leave the Job Object (the launcher would think the game ended): run the launcher as admin if games need it.
+
 ## Data
 
-Games are saved as `games.json` in the Tauri app config dir (e.g. `%APPDATA%\<app identifier>` on Windows).
+Games are saved as `games.json` and cards as `cards.json` in the Tauri app config dir (e.g. `%APPDATA%\<app identifier>` on Windows).
 
 ## Sounds
 
