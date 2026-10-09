@@ -226,29 +226,32 @@ pub async fn read_as_data_url(file: web_sys::File) -> Result<String, String> {
     read_as_data_url_js(file).await.map_err(js_err)?.as_string().ok_or("imagen inválida".into())
 }
 
-const WALLPAPER_KEY: &str = "wallpaper";
-
-pub async fn load_wallpaper() -> Result<Option<String>, String> {
+pub async fn load_wallpaper(orientation: Option<&str>) -> Result<Option<String>, String> {
+    let key = crate::wallpaper::storage_key(orientation)?;
     if is_tauri() {
-        let v = call("load_wallpaper", NoArgs {}).await?;
+        #[derive(Serialize)]
+        struct Args<'a> { orientation: Option<&'a str> }
+        let v = call("load_wallpaper", Args { orientation }).await?;
         serde_wasm_bindgen::from_value(v).map_err(|e| e.to_string())
     } else {
-        Ok(storage().get_item(WALLPAPER_KEY).ok().flatten())
+        storage().get_item(key).map_err(js_err)
     }
 }
 
-pub async fn save_wallpaper(wallpaper: Option<&str>) -> Result<(), String> {
+pub async fn save_wallpaper(wallpaper: Option<&str>, orientation: Option<&str>) -> Result<(), String> {
+    let key = crate::wallpaper::storage_key(orientation)?;
     if is_tauri() {
         #[derive(Serialize)]
         struct Args<'a> {
             wallpaper: Option<&'a str>,
+            orientation: Option<&'a str>,
         }
-        call("save_wallpaper", Args { wallpaper }).await.map(|_| ())
+        call("save_wallpaper", Args { wallpaper, orientation }).await.map(|_| ())
     } else {
         // ponytail: localStorage caps around 5 MB; big wallpapers only fail in browser dev, not in Tauri.
         match wallpaper {
-            Some(w) => storage().set_item(WALLPAPER_KEY, w).map_err(|_| "imagen demasiado grande para el navegador".into()),
-            None => storage().remove_item(WALLPAPER_KEY).map_err(js_err),
+            Some(w) => storage().set_item(key, w).map_err(|_| "imagen demasiado grande para el navegador".into()),
+            None => storage().remove_item(key).map_err(js_err),
         }
     }
 }

@@ -6,6 +6,7 @@ mod hid_profile;
 mod input;
 mod nav;
 mod sound;
+mod wallpaper;
 
 use app::App;
 use leptos::prelude::*;

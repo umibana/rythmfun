@@ -76,11 +76,20 @@ pub fn App() -> impl IntoView {
     let pending = RwSignal::new(None::<LaunchConfirmation>);
     let allow_launch = RwSignal::new(false);
     let wallpaper = RwSignal::new(None::<String>);
-    spawn_local(async move {
-        if let Ok(w) = backend::load_wallpaper().await {
-            wallpaper.set(w);
-        }
-    });
+    let wallpaper_portrait = RwSignal::new(None::<String>);
+    let wallpaper_landscape = RwSignal::new(None::<String>);
+    for (signal, orientation) in [
+        (wallpaper, None),
+        (wallpaper_portrait, Some("portrait")),
+        (wallpaper_landscape, Some("landscape")),
+    ] {
+        spawn_local(async move {
+            match backend::load_wallpaper(orientation).await {
+                Ok(w) => signal.set(w),
+                Err(e) => status.set(Some((format!("No se pudo cargar el fondo: {e}"), true))),
+            }
+        });
+    }
     // Autosave stays off after a failed load so it cannot overwrite the real file.
     let loaded = RwSignal::new(false);
 
@@ -203,6 +212,16 @@ pub fn App() -> impl IntoView {
             class:custom=move || wallpaper.with(Option::is_some)
             style=move || wallpaper.get().map(|w| format!("background-image: url(\"{w}\")")).unwrap_or_default()
         ></div>
+        <div
+            class="wallpaper wallpaper-portrait"
+            class:custom=move || wallpaper_portrait.with(Option::is_some)
+            style=move || wallpaper_portrait.get().map(|w| format!("background-image: url(\"{w}\")")).unwrap_or_default()
+        ></div>
+        <div
+            class="wallpaper wallpaper-landscape"
+            class:custom=move || wallpaper_landscape.with(Option::is_some)
+            style=move || wallpaper_landscape.get().map(|w| format!("background-image: url(\"{w}\")")).unwrap_or_default()
+        ></div>
         <header class="bar" class:active=move || nav.get().zone == Zone::Bar>
             <nav>
                 <TabButton tab=Tab::Home label="Home" nav/>
@@ -225,7 +244,7 @@ pub fn App() -> impl IntoView {
         <main>
             {move || match tab.get() {
                 Tab::Home => view! { <Home games=display_games nav on_action launching/> }.into_any(),
-                Tab::Settings => view! { <Settings games loaded status wallpaper hid_name hid_raw controller_status connect_hid controllers prefs save_prefs/> }.into_any(),
+                Tab::Settings => view! { <Settings games loaded status wallpaper wallpaper_portrait wallpaper_landscape hid_name hid_raw controller_status connect_hid controllers prefs save_prefs/> }.into_any(),
             }}
         </main>
         <Hints nav hid_name/>
@@ -380,12 +399,6 @@ fn Home(games: Memo<Vec<Game>>, nav: RwSignal<Nav>, on_action: Callback<Action>,
                 view! {
                     <div class="selection-info">
                         <p class="caption">{n}</p>
-                        {move || (!games.with(Vec::is_empty)).then(|| view! {
-                            <p class="selection-count">
-                                <span class="ready-dot"></span>"LISTO PARA JUGAR"
-                                <span class="count">{move || format!("{:02} / {:02}", card.get() + 1, games.with(Vec::len))}</span>
-                            </p>
-                        })}
                     </div>
                 }
             }}
@@ -430,6 +443,8 @@ fn Settings(
     loaded: RwSignal<bool>,
     status: RwSignal<Option<(String, bool)>>,
     wallpaper: RwSignal<Option<String>>,
+    wallpaper_portrait: RwSignal<Option<String>>,
+    wallpaper_landscape: RwSignal<Option<String>>,
     hid_name: RwSignal<Option<String>>,
     hid_raw: RwSignal<String>,
     controller_status: RwSignal<String>,
@@ -478,7 +493,11 @@ fn Settings(
             <SystemPrefs prefs save_prefs/>
 
             <h2>"Fondo de pantalla"</h2>
-            <Wallpaper wallpaper status/>
+            <p>"El fondo cambia automáticamente según la orientación de la ventana. Usa una imagen 9:16 para vertical y 16:9 para horizontal; se recortan al centro para llenar la pantalla."</p>
+            <Wallpaper wallpaper=wallpaper_portrait status orientation="portrait" label="Vertical"/>
+            <Wallpaper wallpaper=wallpaper_landscape status orientation="landscape" label="Horizontal"/>
+            <Wallpaper wallpaper status label="Fondo de respaldo"/>
+            <p>"El fondo de respaldo se usa cuando no hay una imagen para la orientación actual."</p>
 
             <h2>"Controlador"</h2>
             <p>{move || hid_name.get().unwrap_or_else(|| "Teclado o gamepad".into())}</p>
@@ -739,10 +758,15 @@ fn CardManager(status: RwSignal<Option<(String, bool)>>) -> impl IntoView {
 }
 
 #[component]
-fn Wallpaper(wallpaper: RwSignal<Option<String>>, status: RwSignal<Option<(String, bool)>>) -> impl IntoView {
+fn Wallpaper(
+    wallpaper: RwSignal<Option<String>>,
+    status: RwSignal<Option<(String, bool)>>,
+    label: &'static str,
+    #[prop(optional)] orientation: Option<&'static str>,
+) -> impl IntoView {
     let set = move |w: Option<String>| {
         spawn_local(async move {
-            match backend::save_wallpaper(w.as_deref()).await {
+            match backend::save_wallpaper(w.as_deref(), orientation).await {
                 Ok(()) => wallpaper.set(w),
                 Err(e) => status.set(Some((format!("No se pudo guardar el fondo: {e}"), true))),
             }
@@ -760,18 +784,22 @@ fn Wallpaper(wallpaper: RwSignal<Option<String>>, status: RwSignal<Option<(Strin
         }
     };
     view! {
+        <div class="wallpaper-setting">
+        <h3>{label}</h3>
         <div class="wallpaper-row">
             <div
                 class="wallpaper-preview"
+                class:portrait=orientation == Some("portrait")
                 style=move || wallpaper.get().map(|w| format!("background-image: url(\"{w}\")")).unwrap_or_default()
             ></div>
             <label class="button">
                 "Elegir imagen"
-                <input type="file" accept="image/*" on:change=on_pick/>
+                <input type="file" accept="image/*" aria-label=format!("Elegir imagen: {label}") on:change=on_pick/>
             </label>
             {move || wallpaper.with(Option::is_some).then(|| view! {
                 <button on:click=move |_| set(None)>"Quitar fondo"</button>
             })}
+        </div>
         </div>
     }
 }

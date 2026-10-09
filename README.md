@@ -30,6 +30,8 @@ Processes that elevate through UAC leave the Job Object (the launcher would thin
 
 Games are saved as `games.json` and cards as `cards.json` in the Tauri app config dir (e.g. `%APPDATA%\<app identifier>` on Windows).
 
+Settings lets you choose separate portrait (ideally 9:16) and landscape (16:9) wallpapers. The background follows the window orientation automatically and uses the original wallpaper as a fallback when that orientation has no image. Each image can be removed independently. Native images are stored in `wallpaper-portrait.txt`, `wallpaper-landscape.txt`, and the existing `wallpaper.txt`; browser development uses corresponding localStorage keys. Wallpapers fill the screen with a centered crop and a subtle 2px blur; game cards have 95% opacity.
+
 ## Sounds
 
 UI sounds are generated with Foley (`@foleyjs/core`) (MIT), vendored in `src/vendor`.

@@ -8,6 +8,9 @@ use tauri_plugin_dialog::DialogExt;
 #[path = "../../src/controller_binding.rs"]
 mod controller_binding;
 
+#[path = "../../src/wallpaper.rs"]
+mod wallpaper;
+
 #[cfg(windows)]
 mod win;
 #[cfg(windows)]
@@ -111,8 +114,9 @@ fn config_file(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
 
 /// Wallpaper is kept as a data URL in its own file so games.json stays small.
 #[tauri::command]
-fn load_wallpaper(app: AppHandle) -> Result<Option<String>, String> {
-    match std::fs::read_to_string(config_file(&app, "wallpaper.txt")?) {
+fn load_wallpaper(app: AppHandle, orientation: Option<String>) -> Result<Option<String>, String> {
+    let key = wallpaper::storage_key(orientation.as_deref())?;
+    match std::fs::read_to_string(config_file(&app, &format!("{key}.txt"))?) {
         Ok(s) => Ok(Some(s)),
         Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e.to_string()),
@@ -120,8 +124,9 @@ fn load_wallpaper(app: AppHandle) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-fn save_wallpaper(app: AppHandle, wallpaper: Option<String>) -> Result<(), String> {
-    let file = config_file(&app, "wallpaper.txt")?;
+fn save_wallpaper(app: AppHandle, wallpaper: Option<String>, orientation: Option<String>) -> Result<(), String> {
+    let key = wallpaper::storage_key(orientation.as_deref())?;
+    let file = config_file(&app, &format!("{key}.txt"))?;
     match wallpaper {
         Some(w) => std::fs::write(file, w).map_err(|e| e.to_string()),
         None => match std::fs::remove_file(file) {

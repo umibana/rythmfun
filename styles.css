@@ -63,6 +63,15 @@ main { flex: 1; min-height: 0; position: relative; }
     linear-gradient(rgb(0 0 0 / 0.55), transparent 22%, transparent 70%, rgb(0 0 0 / 0.6)),
     rgb(0 0 0 / 0.15);
 }
+.wallpaper.custom { filter: blur(2px); }
+
+.wallpaper-portrait, .wallpaper-landscape { display: none; }
+@media (orientation: portrait) {
+  .wallpaper-portrait.custom { display: block; }
+}
+@media (orientation: landscape) {
+  .wallpaper-landscape.custom { display: block; }
+}
 
 button, .button {
   font: inherit;
@@ -143,19 +152,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--text); outl
 }
 .library-heading { display: none; }
 .selection-info { padding: 0 var(--gutter); }
-.selection-count {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 0.55rem;
-  margin: 0.85rem 0 0;
-  font-size: 0.65rem;
-  font-weight: 800;
-  letter-spacing: 0.14em;
-  color: var(--muted);
-}
-.ready-dot { width: 0.4rem; height: 0.4rem; border-radius: 50%; background: #a6e6c5; box-shadow: 0 0 10px rgb(166 230 197 / 0.35); }
-.selection-count .count { margin-left: 0.85rem; padding-left: 1.2rem; border-left: 1px solid var(--line); font-variant-numeric: tabular-nums; }
 .track {
   display: flex;
   gap: var(--gap);
@@ -172,6 +168,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--text); outl
   overflow: hidden;
   background: rgb(255 255 255 / 0.08);
   backdrop-filter: none;
+  opacity: 0.95;
   box-shadow: 0 10px 30px rgb(0 0 0 / 0.35);
   filter: brightness(0.6) saturate(0.85);
   transition:
@@ -231,16 +228,16 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--text); outl
 .hints.tasoller .hint {
   justify-content: center;
   padding: 0.65rem 0.25rem;
-  background: var(--glass-strong);
-  border-bottom: 4px solid var(--pad-color);
+  background: color-mix(in srgb, var(--pad-color) 85%, transparent);
   border-radius: 8px;
-  color: var(--pad-color);
+  color: #24222b;
+  text-shadow: none;
 }
-.pad-left { --pad-color: #ffff00; }
-.pad-right { --pad-color: #ff8020; }
-.pad-back { --pad-color: #a040b0; }
-.pad-confirm { --pad-color: #ffa0c0; }
-.hints.tasoller kbd { background: var(--pad-color); }
+.pad-left { --pad-color: #f4efa8; }
+.pad-right { --pad-color: #ffd1ab; }
+.pad-back { --pad-color: #d8b5e6; }
+.pad-confirm { --pad-color: #f5bed3; }
+.hints.tasoller kbd { background: rgb(255 255 255 / 0.3); color: inherit; }
 @media (max-width: 540px) {
   .hints.tasoller { font-size: 0.75rem; padding-inline: 0.5rem; }
   .hints.tasoller .hint { flex-direction: column; }
@@ -296,6 +293,8 @@ kbd {
 .thumb input, .button input { display: none; }
 .actions { display: flex; gap: 0.5rem; margin: 1rem 0 0; }
 .wallpaper-row { display: flex; gap: 0.75rem; align-items: center; }
+.wallpaper-setting { margin-block: 1rem; }
+.wallpaper-setting h3 { margin: 0 0 0.75rem; }
 .wallpaper-preview {
   width: 8rem;
   aspect-ratio: 16 / 9;
@@ -305,6 +304,7 @@ kbd {
   background-size: cover;
   background-position: center;
 }
+.wallpaper-preview.portrait { width: 4.5rem; aspect-ratio: 9 / 16; }
 .raw { background: rgb(255 255 255 / 0.05); padding: 1rem; border-radius: 12px; min-height: 3rem; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); }
 
 /* Portrait screens (9:16): one cover fills the width, neighbors just peek in. */
@@ -331,7 +331,6 @@ kbd {
   .card { border-radius: clamp(12px, 2vw, 24px); }
   .card.selected { transform: scale(1.04); }
   .caption { font-size: clamp(1.6rem, 4.2vw, 3rem); line-height: 1.25; }
-  .selection-count { margin-top: 1.2rem; font-size: clamp(0.6rem, 1.35vw, 0.85rem); }
   .hints .device { display: none; }
   .hints { justify-content: center; padding-top: 1.2rem; padding-bottom: clamp(1.25rem, 3dvh, 3rem); border-top: 1px solid rgb(255 255 255 / 0.07); background: rgb(16 17 22 / 0.35); }
   .hints.tasoller .device { display: none; }
@@ -361,7 +360,6 @@ kbd {
   .library-heading h1 { margin-top: 0.5rem; font-size: 1.6rem; }
   .library-heading p { display: none; }
   .track { padding-block: 1.25rem; }
-  .selection-count { margin-top: 0.6rem; }
   .hints { padding-block: 0.75rem; }
 }
 
@@ -370,7 +368,6 @@ kbd {
   .bar { padding-top: 0.5rem; }
   .home { gap: 0.25rem; }
   .track { padding-block: 1rem; }
-  .selection-count { display: none; }
   .hints { padding-block: 0.5rem; }
 }
 
