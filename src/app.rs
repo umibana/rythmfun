@@ -169,8 +169,14 @@ pub fn App() -> impl IntoView {
         }
     });
 
-    input::keyboard(move |a| on_action.run(a));
-    input::gamepad(move |a| on_action.run(a), move |devices| gamepad_devices.set(devices));
+    let vertical_home = move || {
+        let n = nav.get_untracked();
+        n.tab == Tab::Home && n.zone == Zone::Content && pending.with_untracked(Option::is_none)
+            && window().inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(1.0)
+                <= window().inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(0.0)
+    };
+    input::keyboard(move |a| on_action.run(a), vertical_home);
+    input::gamepad(move |a| on_action.run(a), move |devices| gamepad_devices.set(devices), vertical_home);
 
     let connect_hid = Callback::new(move |ask: bool| {
         spawn_local(async move {
@@ -291,13 +297,14 @@ fn Hints(nav: RwSignal<Nav>, hid_name: RwSignal<Option<String>>) -> impl IntoVie
         (Zone::Content, Tab::Settings) => vec![("⌫", "Menú")],
     };
     view! {
-        <footer class="hints" class:tasoller=tasoller>
+        <footer class="hints" class:tasoller=tasoller
+            class:vertical-home=move || nav.with(|n| n.tab == Tab::Home && n.zone == Zone::Content)>
             <span class="device">{move || hid_name.get().unwrap_or_else(|| "Teclado o gamepad".into())}</span>
             <span class="keys">
                 {move || if tasoller() {
                     view! {
-                        <span class="hint pad-left"><kbd>"←"</kbd>"Izquierda"</span>
-                        <span class="hint pad-right"><kbd>"→"</kbd>"Derecha"</span>
+                        <span class="hint pad-left"><kbd><span class="direction-horizontal">"←"</span><span class="direction-vertical">"↑"</span></kbd><span class="direction-horizontal">"Izquierda"</span><span class="direction-vertical">"Arriba"</span></span>
+                        <span class="hint pad-right"><kbd><span class="direction-horizontal">"→"</span><span class="direction-vertical">"↓"</span></kbd><span class="direction-horizontal">"Derecha"</span><span class="direction-vertical">"Abajo"</span></span>
                         <span class="hint pad-back"><kbd>"⌫"</kbd>"Menú"</span>
                         <span class="hint pad-confirm"><kbd>"⏎"</kbd>
                             {move || match nav.with(|n| (n.zone, n.tab)) {
@@ -309,7 +316,9 @@ fn Hints(nav: RwSignal<Nav>, hid_name: RwSignal<Option<String>>) -> impl IntoVie
                     }.into_any()
                 } else {
                     hints().into_iter().map(|(k, label)| view! {
-                        <span class="hint"><kbd>{k}</kbd>{label}</span>
+                        <span class="hint"><kbd>{if k == "← →" {
+                            view! { <span class="direction-horizontal">{k}</span><span class="direction-vertical">"↑ ↓"</span> }.into_any()
+                        } else { k.into_any() }}</kbd>{label}</span>
                     }).collect_view().into_any()
                 }}
             </span>
@@ -385,11 +394,13 @@ fn Home(games: Memo<Vec<Game>>, nav: RwSignal<Nav>, on_action: Callback<Action>,
                     }.into_any();
                 }
                 view! {
+                    <div class="carousel">
                     <div class="track" style=move || format!("--i: {}", card.get())>
                         {list.into_iter()
                             .enumerate()
                             .map(|(i, g)| view! { <GameCard i g card nav on_action launching/> })
                             .collect_view()}
+                    </div>
                     </div>
                 }.into_any()
             }}
@@ -416,6 +427,9 @@ fn GameCard(i: usize, g: Game, card: Memo<usize>, nav: RwSignal<Nav>, on_action:
             tabindex="-1"
             aria-label=g.name.clone()
             class:selected=move || selected.get()
+            class:previous=move || card.get().checked_sub(1) == Some(i)
+            class:next=move || card.get().checked_add(1) == Some(i)
+            style=move || format!("--offset: {}", i as i64 - card.get() as i64)
             class:launching=move || launching.get() == Some(i)
             on:mousedown=|e| e.prevent_default()
             on:click=move |_| {

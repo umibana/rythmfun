@@ -13,7 +13,7 @@ const STICK_DEADZONE: f64 = 0.5;
 const GAMEPAD_POLL: Duration = Duration::from_millis(16);
 
 /// Arrows, Enter, Backspace. Ignored while typing in a text field.
-pub fn keyboard(on: impl Fn(Action) + 'static) {
+pub fn keyboard(on: impl Fn(Action) + 'static, vertical_home: impl Fn() -> bool + 'static) {
     let _ = window_event_listener(ev::keydown, move |e: KeyboardEvent| {
         if e.alt_key() || e.ctrl_key() || e.meta_key() {
             return;
@@ -26,13 +26,7 @@ pub fn keyboard(on: impl Fn(Action) + 'static) {
         if matches!(tag.as_str(), "INPUT" | "TEXTAREA" | "SELECT") {
             return;
         }
-        let a = match e.key().as_str() {
-            "ArrowLeft" => Action::Left,
-            "ArrowRight" => Action::Right,
-            "Enter" => Action::Confirm,
-            "Backspace" | "Escape" => Action::Back,
-            _ => return,
-        };
+        let Some(a) = crate::nav::keyboard_action(&e.key(), vertical_home()) else { return; };
         // A focused button handles Enter natively (click).
         if tag == "BUTTON" && a == Action::Confirm {
             return;
@@ -49,7 +43,7 @@ pub fn keyboard(on: impl Fn(Action) + 'static) {
 
 /// Standard-mapping gamepads: d-pad/left stick, A = Confirm, B = Back. Fires on press edge.
 // ponytail: no hold-to-repeat; add if scrolling long lists by holding feels needed.
-pub fn gamepad(on: impl Fn(Action) + 'static, on_devices: impl Fn(Vec<ControllerBinding>) + 'static) {
+pub fn gamepad(on: impl Fn(Action) + 'static, on_devices: impl Fn(Vec<ControllerBinding>) + 'static, vertical_home: impl Fn() -> bool + 'static) {
     const ORDER: [Action; 4] = [Action::Left, Action::Right, Action::Confirm, Action::Back];
     let prev = RefCell::new([false; 4]);
     let devices = RefCell::new(Vec::new());
@@ -60,7 +54,7 @@ pub fn gamepad(on: impl Fn(Action) + 'static, on_devices: impl Fn(Vec<Controller
                 *devices.borrow_mut() = connected.clone();
                 on_devices(connected);
             }
-            let now = read_gamepads();
+            let now = read_gamepads(vertical_home());
             let was = prev.replace(now);
             for i in 0..4 {
                 if now[i] && !was[i] {
@@ -84,7 +78,7 @@ fn gamepad_devices() -> Vec<ControllerBinding> {
     devices
 }
 
-fn read_gamepads() -> [bool; 4] {
+fn read_gamepads(vertical_home: bool) -> [bool; 4] {
     let mut s = [false; 4];
     let Ok(pads) = web_sys::window().unwrap().navigator().get_gamepads() else {
         return s;
@@ -101,6 +95,11 @@ fn read_gamepads() -> [bool; 4] {
         let x = p.axes().get(0).as_f64().unwrap_or(0.0);
         s[0] |= btn(14) || x < -STICK_DEADZONE;
         s[1] |= btn(15) || x > STICK_DEADZONE;
+        if vertical_home {
+            let y = p.axes().get(1).as_f64().unwrap_or(0.0);
+            s[0] |= btn(12) || y < -STICK_DEADZONE;
+            s[1] |= btn(13) || y > STICK_DEADZONE;
+        }
         s[2] |= btn(0);
         s[3] |= btn(1);
     }

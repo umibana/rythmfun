@@ -13,6 +13,8 @@ Game launcher (Tauri 2 + Leptos) for rhythm-game cabinets. It runs `.bat`/`.lnk`
 - TASOLLER slider: move left/right, confirm, and exit menus.
 - FN1 + FN2: close the game.
 
+In portrait windows, games form a vertical cover flow: the selected game stays centered and neighboring covers fade above and below. Use Up/Down on the keyboard or gamepad to browse; Left/Right and TASOLLER inputs still work. Landscape keeps the horizontal carousel. Reduced-motion preferences disable the transitions.
+
 ## Launching (Windows)
 
 Pressing a game runs, in order:

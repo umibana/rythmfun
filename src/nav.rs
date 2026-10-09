@@ -6,6 +6,19 @@ pub enum Action {
     Back,
 }
 
+/// Up/down are aliases only while browsing the portrait game carousel.
+pub fn keyboard_action(key: &str, vertical_home: bool) -> Option<Action> {
+    match key {
+        "ArrowLeft" => Some(Action::Left),
+        "ArrowRight" => Some(Action::Right),
+        "ArrowUp" if vertical_home => Some(Action::Left),
+        "ArrowDown" if vertical_home => Some(Action::Right),
+        "Enter" => Some(Action::Confirm),
+        "Backspace" | "Escape" => Some(Action::Back),
+        _ => None,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
     Home,
@@ -80,6 +93,23 @@ impl Nav {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vertical_arrows_select_previous_and_next_game() {
+        assert_eq!(keyboard_action("ArrowUp", true), Some(Action::Left));
+        assert_eq!(keyboard_action("ArrowDown", true), Some(Action::Right));
+        assert_eq!(home(1).step(keyboard_action("ArrowUp", true).unwrap(), 3), (home(0), Outcome::Moved));
+        assert_eq!(home(1).step(keyboard_action("ArrowDown", true).unwrap(), 3), (home(2), Outcome::Moved));
+    }
+
+    #[test]
+    fn vertical_arrows_are_ignored_outside_vertical_home() {
+        assert_eq!(keyboard_action("ArrowUp", false), None);
+        assert_eq!(keyboard_action("ArrowDown", false), None);
+        assert_eq!(keyboard_action("ArrowLeft", true), Some(Action::Left));
+        assert_eq!(keyboard_action("ArrowRight", false), Some(Action::Right));
+        assert_eq!(keyboard_action("Enter", true), Some(Action::Confirm));
+    }
 
     fn home(card: usize) -> Nav {
         Nav { card, ..Nav::default() }

@@ -152,6 +152,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--text); outl
 }
 .library-heading { display: none; }
 .selection-info { padding: 0 var(--gutter); }
+.carousel { display: contents; }
 .track {
   display: flex;
   gap: var(--gap);
@@ -222,6 +223,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--text); outl
 .keys { display: flex; gap: 1.25rem; }
 .device { max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hint { display: inline-flex; align-items: center; gap: 0.45rem; color: var(--text); }
+.direction-vertical { display: none; }
 .hints.tasoller { display: block; }
 .hints.tasoller .device { display: block; max-width: 100%; margin-bottom: 0.5rem; font-size: 0.75rem; }
 .hints.tasoller .keys { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.4rem; }
@@ -307,7 +309,7 @@ kbd {
 .wallpaper-preview.portrait { width: 4.5rem; aspect-ratio: 9 / 16; }
 .raw { background: rgb(255 255 255 / 0.05); padding: 1rem; border-radius: 12px; min-height: 3rem; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); }
 
-/* Portrait screens (9:16): one cover fills the width, neighbors just peek in. */
+/* Portrait: a centered vertical cover flow with fading neighbors. */
 @media (orientation: portrait) {
   :root { --w: 82vw; --gap: 6vw; --gutter: clamp(1.25rem, 5vw, 4rem); }
   .bar { padding-top: clamp(1.25rem, 3dvh, 3rem); }
@@ -323,6 +325,34 @@ kbd {
       radial-gradient(ellipse 110% 50% at 50% 48%, #2a2c33, var(--bg));
   }
   .home { gap: clamp(1.5rem, 3dvh, 3.5rem); padding-bottom: 3dvh; }
+  .carousel {
+    display: block;
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    overflow: hidden;
+    mask-image: linear-gradient(to bottom, transparent, #000 15%, #000 85%, transparent);
+  }
+  .carousel .track { position: absolute; inset: 0; display: block; padding: 0; transform: none; }
+  .carousel .card {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: var(--w);
+    height: calc(var(--w) * 9 / 16);
+    transform: translate(-50%, -50%) translateY(calc(var(--offset) * (var(--w) * 9 / 16 * 0.72 + 1rem))) scale(0.78);
+    opacity: 0;
+    pointer-events: none;
+    z-index: 0;
+    transition: transform 550ms var(--slide), opacity 420ms ease, filter 300ms ease, box-shadow 300ms ease;
+  }
+  .carousel .card.previous, .carousel .card.next { opacity: 0.35; z-index: 1; }
+  .carousel .card.selected { transform: translate(-50%, -50%) scale(1); opacity: 0.95; pointer-events: auto; z-index: 2; }
+  .home.resting .carousel .card.selected { transform: translate(-50%, -50%) scale(0.97); }
+  .carousel .card.launching { animation: portrait-press 420ms var(--pop); }
+  .hints.vertical-home .direction-horizontal { display: none; }
+  .hints.vertical-home .direction-vertical { display: inline; }
   .library-heading { display: block; padding: 0 var(--gutter); text-align: center; }
   .eyebrow { color: var(--muted); font-size: clamp(0.7rem, 1.7vw, 1rem); font-weight: 800; letter-spacing: 0.28em; }
   .library-heading h1 { margin: 1rem 0 0.65rem; font-size: clamp(1.8rem, 5.7vw, 3.8rem); line-height: 1.15; letter-spacing: -0.045em; }
@@ -342,6 +372,8 @@ kbd {
   .row .path { flex-basis: 100%; order: 1; }
   .wallpaper-row, .controller-choice { flex-wrap: wrap; }
 }
+
+@keyframes portrait-press { 30% { transform: translate(-50%, -50%) scale(0.96); } }
 
 @media (max-width: 600px) {
   .bar { padding-inline: 1rem; }
