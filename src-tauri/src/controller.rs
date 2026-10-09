@@ -1,4 +1,4 @@
-use crate::controller_profile::{tasoller_zones, tasoller_lights, hid_fn_buttons, Action, ZoneEdges, StopCombo};
+use crate::controller_profile::{tasoller_zones, tasoller_lights, hid_fn_buttons, Action, ZoneEdges, StopCombo, Fn1Tap};
 use crate::controller_hid::TasollerHid;
 use crate::controller_usb::TasollerUsb;
 use serde::Serialize;
@@ -97,6 +97,7 @@ fn run(shared: Arc<Mutex<Shared>>, commands: mpsc::Receiver<Command>, stop_reque
     let mut last_valid = Instant::now();
     let mut buttons = None;
     let mut combo = StopCombo::default();
+    let mut fn1 = Fn1Tap::default();
     let mut last_lights = None;
     let mut led_retry = Instant::now();
     let mut led_error = None;
@@ -120,6 +121,7 @@ fn run(shared: Arc<Mutex<Shared>>, commands: mpsc::Receiver<Command>, stop_reque
                 paused = true;
                 retry = Instant::now();
                 combo = StopCombo::default();
+                fn1 = Fn1Tap::default();
                 stop_requested.store(false, Ordering::SeqCst);
                 shared.lock().unwrap_or_else(|e| e.into_inner()).reset("Controlador cedido al juego");
                 let _ = ack.send(());
@@ -136,7 +138,7 @@ fn run(shared: Arc<Mutex<Shared>>, commands: mpsc::Receiver<Command>, stop_reque
             if buttons.is_none() && Instant::now() >= retry {
                 retry = Instant::now() + Duration::from_secs(1);
                 match TasollerHid::open() {
-                    Ok(Some(hid)) => { buttons = Some(hid); combo = StopCombo::default(); last_valid = Instant::now(); }
+                    Ok(Some(hid)) => { buttons = Some(hid); combo = StopCombo::default(); fn1 = Fn1Tap::default(); last_valid = Instant::now(); }
                     Ok(None) => shared.lock().unwrap_or_else(|e| e.into_inner()).status = "Juego activo · TASOLLER desconectado".into(),
                     Err(e) => shared.lock().unwrap_or_else(|e| e.into_inner()).status = format!("Juego activo · no se puede leer FN1 + FN2: {e}"),
                 }
@@ -147,6 +149,7 @@ fn run(shared: Arc<Mutex<Shared>>, commands: mpsc::Receiver<Command>, stop_reque
                         if let Some(fn_buttons) = hid_fn_buttons(&packet) {
                             last_valid = Instant::now();
                             if combo.update(fn_buttons) { stop_requested.store(true, Ordering::SeqCst); }
+                            if fn1.update(fn_buttons) { crate::win::request_track_skip(); }
                             shared.lock().unwrap_or_else(|e| e.into_inner()).status = "Juego activo · FN1 + FN2 para cerrar".into();
                         }
                     }
@@ -154,6 +157,7 @@ fn run(shared: Arc<Mutex<Shared>>, commands: mpsc::Receiver<Command>, stop_reque
                     Err(e) => {
                         buttons = None;
                         combo = StopCombo::default();
+                        fn1 = Fn1Tap::default();
                         shared.lock().unwrap_or_else(|e| e.into_inner()).status = format!("Lectura FN desconectada: {e}");
                     }
                 }
@@ -161,6 +165,7 @@ fn run(shared: Arc<Mutex<Shared>>, commands: mpsc::Receiver<Command>, stop_reque
             if buttons.is_some() && last_valid.elapsed() > Duration::from_secs(1) {
                 buttons = None;
                 combo = StopCombo::default();
+                fn1 = Fn1Tap::default();
             }
             continue;
         }

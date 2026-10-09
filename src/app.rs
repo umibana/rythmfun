@@ -22,6 +22,34 @@ pub fn App() -> impl IntoView {
     let controller_status = RwSignal::new(String::new());
     let launching = RwSignal::new(None::<usize>);
     let playing = RwSignal::new(false);
+    let prefs = RwSignal::new(None::<backend::Prefs>);
+    spawn_local(async move {
+        match backend::load_prefs().await {
+            Ok(p) => prefs.set(Some(p)),
+            Err(e) => status.set(Some((format!("No se pudieron cargar las preferencias: {e}"), true))),
+        }
+    });
+    let save_prefs = Callback::new(move |p: backend::Prefs| {
+        prefs.set(Some(p));
+        spawn_local(async move {
+            if let Err(e) = backend::save_prefs(p).await {
+                status.set(Some((format!("No se pudo guardar: {e}"), true)));
+            }
+        });
+    });
+    let toggle_fullscreen = Callback::new(move |()| {
+        if playing.get_untracked() { return; }
+        if let Some(mut p) = prefs.get_untracked() {
+            p.fullscreen = !p.fullscreen;
+            save_prefs.run(p);
+        }
+    });
+    let _ = window_event_listener(leptos::ev::keydown, move |e| {
+        if backend::is_tauri() && e.key() == "F11" && !e.alt_key() && !e.ctrl_key() && !e.meta_key() {
+            e.prevent_default();
+            if !e.repeat() { toggle_fullscreen.run(()); }
+        }
+    });
     let hid_devices = RwSignal::new(Vec::<ControllerBinding>::new());
     let gamepad_devices = RwSignal::new(Vec::<ControllerBinding>::new());
     let controllers = Memo::new(move |_| {
@@ -180,7 +208,16 @@ pub fn App() -> impl IntoView {
                 <TabButton tab=Tab::Home label="Home" nav/>
                 <TabButton tab=Tab::Settings label="Settings" nav/>
             </nav>
-            <Clock/>
+            <div class="bar-tools">
+                {backend::is_tauri().then(|| view! {
+                    <button class="fullscreen-toggle" title="Alternar pantalla completa (F11)"
+                        tabindex="-1" on:mousedown=|e| e.prevent_default()
+                        aria-label="Alternar pantalla completa" aria-pressed=move || prefs.with(|p| p.as_ref().is_some_and(|p| p.fullscreen)).to_string()
+                        prop:disabled=move || prefs.with(Option::is_none)
+                        on:click=move |_| toggle_fullscreen.run(())>"⛶"</button>
+                })}
+                <Clock/>
+            </div>
         </header>
         {move || status.get().map(|(s, err)| view! {
             <p class="status" class:error=err role="status" on:click=move |_| status.set(None)>{s}</p>
@@ -188,7 +225,7 @@ pub fn App() -> impl IntoView {
         <main>
             {move || match tab.get() {
                 Tab::Home => view! { <Home games=display_games nav on_action launching/> }.into_any(),
-                Tab::Settings => view! { <Settings games loaded status wallpaper hid_name hid_raw controller_status connect_hid controllers/> }.into_any(),
+                Tab::Settings => view! { <Settings games loaded status wallpaper hid_name hid_raw controller_status connect_hid controllers prefs save_prefs/> }.into_any(),
             }}
         </main>
         <Hints nav hid_name/>
@@ -242,7 +279,7 @@ fn Hints(nav: RwSignal<Nav>, hid_name: RwSignal<Option<String>>) -> impl IntoVie
                     view! {
                         <span class="hint pad-left"><kbd>"←"</kbd>"Izquierda"</span>
                         <span class="hint pad-right"><kbd>"→"</kbd>"Derecha"</span>
-                        <span class="hint pad-back"><kbd>"⌫"</kbd>"Volver"</span>
+                        <span class="hint pad-back"><kbd>"⌫"</kbd>"Menú"</span>
                         <span class="hint pad-confirm"><kbd>"⏎"</kbd>
                             {move || match nav.with(|n| (n.zone, n.tab)) {
                                 (Zone::Content, Tab::Home) => "Jugar",
@@ -316,6 +353,11 @@ fn Home(games: Memo<Vec<Game>>, nav: RwSignal<Nav>, on_action: Callback<Action>,
     let name = move || games.with(|g| g.get(card.get()).map(|g| g.name.clone()).unwrap_or_default());
     view! {
         <section class="home" class:resting=move || nav.get().zone == Zone::Bar>
+            <div class="library-heading">
+                <span class="eyebrow">"RYTHM FUN"</span>
+                <h1>"Tu próximo ritmo."</h1>
+                <p>"Elige un juego y empieza a tocar."</p>
+            </div>
             {move || {
                 let list = games.get();
                 if list.is_empty() {
@@ -335,7 +377,17 @@ fn Home(games: Memo<Vec<Game>>, nav: RwSignal<Nav>, on_action: Callback<Action>,
             // Re-created on every change so the fade-in replays.
             {move || {
                 let n = name();
-                view! { <p class="caption">{n}</p> }
+                view! {
+                    <div class="selection-info">
+                        <p class="caption">{n}</p>
+                        {move || (!games.with(Vec::is_empty)).then(|| view! {
+                            <p class="selection-count">
+                                <span class="ready-dot"></span>"LISTO PARA JUGAR"
+                                <span class="count">{move || format!("{:02} / {:02}", card.get() + 1, games.with(Vec::len))}</span>
+                            </p>
+                        })}
+                    </div>
+                }
             }}
         </section>
     }
@@ -383,6 +435,8 @@ fn Settings(
     controller_status: RwSignal<String>,
     connect_hid: Callback<bool>,
     controllers: Memo<Vec<ControllerBinding>>,
+    prefs: RwSignal<Option<backend::Prefs>>,
+    save_prefs: Callback<backend::Prefs>,
 ) -> impl IntoView {
     // Rows are keyed signals so typing re-renders one field, not the whole list (keeps focus).
     let next_id = StoredValue::new(0u32);
@@ -421,7 +475,7 @@ fn Settings(
             <CardManager status/>
 
             <h2>"Sistema"</h2>
-            <SystemPrefs status/>
+            <SystemPrefs prefs save_prefs/>
 
             <h2>"Fondo de pantalla"</h2>
             <Wallpaper wallpaper status/>
@@ -576,14 +630,7 @@ fn GameOptions(g: RwSignal<Game>, controllers: Memo<Vec<ControllerBinding>>) -> 
 }
 
 #[component]
-fn SystemPrefs(status: RwSignal<Option<(String, bool)>>) -> impl IntoView {
-    let prefs = RwSignal::new(None::<backend::Prefs>);
-    spawn_local(async move {
-        match backend::load_prefs().await {
-            Ok(p) => prefs.set(Some(p)),
-            Err(e) => status.set(Some((format!("No se pudieron cargar las preferencias: {e}"), true))),
-        }
-    });
+fn SystemPrefs(prefs: RwSignal<Option<backend::Prefs>>, save_prefs: Callback<backend::Prefs>) -> impl IntoView {
     let toggle = move |label: &'static str, get: fn(&backend::Prefs) -> bool, set: fn(&mut backend::Prefs, bool)| {
         view! {
             <label class="switch">
@@ -594,12 +641,7 @@ fn SystemPrefs(status: RwSignal<Option<(String, bool)>>) -> impl IntoView {
                     on:change=move |e| {
                         let Some(mut p) = prefs.get_untracked() else { return };
                         set(&mut p, event_target_checked(&e));
-                        prefs.set(Some(p));
-                        spawn_local(async move {
-                            if let Err(e) = backend::save_prefs(p).await {
-                                status.set(Some((format!("No se pudo guardar: {e}"), true)));
-                            }
-                        });
+                        save_prefs.run(p);
                     }
                 />
                 {label}
@@ -610,6 +652,7 @@ fn SystemPrefs(status: RwSignal<Option<(String, bool)>>) -> impl IntoView {
         <div class="prefs">
             {toggle("Iniciar con Windows", |p| p.autostart, |p, v| p.autostart = v)}
             {toggle("Siempre encima (excepto mientras se juega)", |p| p.always_on_top, |p, v| p.always_on_top = v)}
+            {toggle("Pantalla completa (F11 para alternar)", |p| p.fullscreen, |p, v| p.fullscreen = v)}
         </div>
     }
 }

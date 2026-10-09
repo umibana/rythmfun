@@ -158,11 +158,12 @@ pub async fn launch(game: &Game) -> Result<(), String> {
 pub struct Prefs {
     pub autostart: bool,
     pub always_on_top: bool,
+    pub fullscreen: bool,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
-        Prefs { autostart: true, always_on_top: true }
+        Prefs { autostart: true, always_on_top: true, fullscreen: true }
     }
 }
 

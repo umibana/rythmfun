@@ -74,11 +74,12 @@ struct Cards {
 struct Prefs {
     autostart: bool,
     always_on_top: bool,
+    fullscreen: bool,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
-        Prefs { autostart: true, always_on_top: true }
+        Prefs { autostart: true, always_on_top: true, fullscreen: true }
     }
 }
 
@@ -157,16 +158,18 @@ fn load_prefs_file(app: &AppHandle) -> Prefs {
 fn apply_prefs(app: &AppHandle, p: Prefs) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("main") {
         w.set_always_on_top(p.always_on_top).map_err(|e| e.to_string())?;
+        w.set_fullscreen(p.fullscreen).map_err(|e| e.to_string())?;
     }
-    // Release only: dev builds would register target/debug as the startup program.
-    #[cfg(not(debug_assertions))]
+    // Embedded standalone builds can start at login even with debug assertions.
+    // Dev-server builds cannot run independently, so leave their startup entry alone.
+    #[cfg(any(not(debug_assertions), feature = "custom-protocol"))]
     {
         use tauri_plugin_autostart::ManagerExt;
         let auto = app.autolaunch();
-        if auto.is_enabled().unwrap_or(false) != p.autostart {
-            let r = if p.autostart { auto.enable() } else { auto.disable() };
-            r.map_err(|e| format!("Inicio con Windows: {e}"))?;
-        }
+        // Refresh the current executable path: is_enabled only checks entry presence,
+        // so it can report true for a launcher that has moved or been replaced.
+        let r = if p.autostart { auto.enable() } else { auto.disable() };
+        r.map_err(|e| format!("Inicio con Windows: {e}"))?;
     }
     Ok(())
 }
@@ -315,6 +318,21 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn older_prefs_open_fullscreen() {
+        let prefs: Prefs = serde_json::from_str(r#"{"autostart":false,"always_on_top":false}"#).unwrap();
+        assert!(prefs.fullscreen);
+        assert!(!prefs.autostart);
+        assert!(!prefs.always_on_top);
+    }
+
+    #[test]
+    fn fullscreen_can_be_disabled_in_saved_prefs() {
+        let prefs: Prefs = serde_json::from_str(r#"{"fullscreen":false}"#).unwrap();
+        assert!(!prefs.fullscreen);
+        assert!(prefs.autostart);
+    }
 
     #[test]
     fn missing_file_is_empty_and_round_trip_works() {

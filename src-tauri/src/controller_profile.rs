@@ -36,6 +36,23 @@ pub fn hid_fn_buttons(report: &[u8]) -> Option<u8> {
 #[derive(Default)]
 pub struct StopCombo { armed: bool }
 
+#[derive(Default)]
+pub struct Fn1Tap { armed: bool, candidate: bool }
+impl Fn1Tap {
+    pub fn update(&mut self, buttons: u8) -> bool {
+        let buttons = buttons & 0xc0;
+        if buttons == 0 {
+            let tap = self.candidate;
+            self.candidate = false;
+            self.armed = true;
+            return tap;
+        }
+        if buttons & 0x40 != 0 { self.armed = false; self.candidate = false; }
+        else if self.armed { self.candidate = true; self.armed = false; }
+        false
+    }
+}
+
 impl StopCombo {
     pub fn update(&mut self, buttons: u8) -> bool {
         let buttons = buttons & 0xc0;
@@ -80,6 +97,25 @@ impl ZoneEdges {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fn1_skip_on_release_cancels_for_stop_combo_and_requires_neutral() {
+        let mut tap = Fn1Tap::default();
+        assert!(!tap.update(0x80));
+        assert!(!tap.update(0));
+        assert!(!tap.update(0x80));
+        assert!(tap.update(0));
+        assert!(!tap.update(0));
+        assert!(!tap.update(0x80));
+        assert!(!tap.update(0xc0));
+        assert!(!tap.update(0x80));
+        assert!(!tap.update(0));
+        assert!(!tap.update(0x40));
+        assert!(!tap.update(0x80));
+        assert!(!tap.update(0));
+        assert!(!tap.update(0x80));
+        assert!(tap.update(0));
+    }
 
     fn packet() -> [u8; 36] {
         let mut p = [0; 36];

@@ -26,6 +26,20 @@ fn last_error() -> String {
     std::io::Error::last_os_error().to_string()
 }
 
+/// The mod owns this event; absent in other games. Never inject keyboard input.
+pub fn request_track_skip() {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn OpenEventW(access: u32, inherit: i32, name: *const u16) -> HANDLE;
+        fn SetEvent(event: HANDLE) -> i32;
+    }
+    let name: Vec<u16> = "Local\\RythmFun.ChuniQOL.TrackSkip".encode_utf16().chain([0]).collect();
+    unsafe {
+        let event = OpenEventW(2, 0, name.as_ptr());
+        if !event.is_null() { SetEvent(event); CloseHandle(event); }
+    }
+}
+
 fn wide(s: &std::ffi::OsStr) -> Vec<u16> {
     s.encode_wide().chain([0]).collect()
 }

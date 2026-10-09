@@ -1,11 +1,12 @@
-# Rythm Fun Launcher
+# Rythm Fun
 
-Switch-style game launcher (Tauri 2 + Leptos) for rhythm-game cabinets. It runs `.bat`/`.lnk` games and is navigable with four inputs.
+Game launcher (Tauri 2 + Leptos) for rhythm-game cabinets. It runs `.bat`/`.lnk` games and is navigable with four inputs.
 
 ## Development
 
 - Browser: `trunk serve`, then open http://localhost:1420. Games are stored in `localStorage` and launching only logs to the console.
 - Desktop: `cargo tauri dev` / `cargo tauri build`.
+- Standalone executable: `trunk build --release`, then `cargo build -p rythmfunlauncher --features custom-protocol`. This embeds the interface and needs no local server.
 
 ## Controls
 
@@ -16,7 +17,7 @@ Switch-style game launcher (Tauri 2 + Leptos) for rhythm-game cabinets. It runs 
 
 Pressing a game runs, in order:
 
-1. Writes the active Aime card to the game's card file (`[aime] aimePath` in its `segatools.ini`, relative to the game folder).
+1. Writes the active card to the game's card file
 2. Runs the "before" script and waits for it.
 3. Changes the primary display (resolution, Hz, rotation) if the game has one set. The change is not saved to the registry, so a reboot always undoes it; a crash is undone on the next launcher start.
 4. Starts the `.bat`/`.lnk`/`.exe` inside a Job Object and waits until every process it spawned exits.

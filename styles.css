@@ -21,7 +21,7 @@
   --danger: #ff6b6b;
   --gutter: clamp(1.5rem, 4vw, 4rem);
   /* Cover width (16:9): as big as the screen allows, leaving room for bar, caption and hints. */
-  --w: min(56vw, calc((100vh - 17rem) * 16 / 9));
+  --w: max(10rem, min(56vw, calc((100dvh - 22rem) * 16 / 9)));
   --gap: 3vw;
   /* Slide: fast start, long soft settle. Pop: tiny overshoot on the selected cover. */
   --slide: cubic-bezier(0.22, 1, 0.36, 1);
@@ -37,6 +37,7 @@
 body {
   margin: 0;
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -106,6 +107,10 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--text); outl
 .clock .time { font-weight: 800; font-size: 1.4rem; }
 .clock .date { color: var(--muted); }
 .clock .date::first-letter { text-transform: uppercase; }
+.bar-tools { display: flex; align-items: center; gap: 1rem; }
+.fullscreen-toggle { width: 2.6rem; height: 2.6rem; padding: 0; font-size: 1.6rem; line-height: 1; }
+.fullscreen-toggle:hover { background: rgb(255 255 255 / 0.16); }
+.bar, .hints { flex-shrink: 0; }
 
 .status {
   position: absolute;
@@ -121,6 +126,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--text); outl
   border: 1px solid var(--line);
   cursor: pointer;
   animation: drop 260ms var(--slide);
+  max-width: calc(100vw - 2 * var(--gutter));
+  overflow-wrap: anywhere;
 }
 .status.error { border-color: var(--danger); }
 @keyframes drop { from { opacity: 0; transform: translate(-50%, -8px); } }
@@ -134,6 +141,21 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--text); outl
   gap: 1.75rem;
   overflow: hidden;
 }
+.library-heading { display: none; }
+.selection-info { padding: 0 var(--gutter); }
+.selection-count {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0.85rem 0 0;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+.ready-dot { width: 0.4rem; height: 0.4rem; border-radius: 50%; background: #a6e6c5; box-shadow: 0 0 10px rgb(166 230 197 / 0.35); }
+.selection-count .count { margin-left: 0.85rem; padding-left: 1.2rem; border-left: 1px solid var(--line); font-variant-numeric: tabular-nums; }
 .track {
   display: flex;
   gap: var(--gap);
@@ -183,6 +205,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--text); outl
   font-size: clamp(1.4rem, 2.4vw, 2.2rem);
   text-shadow: 0 2px 14px rgb(0 0 0 / 0.6);
   animation: rise 380ms var(--slide);
+  overflow-wrap: anywhere;
 }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
 .home.resting .caption { color: var(--muted); }
@@ -200,9 +223,10 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--text); outl
   text-shadow: 0 1px 8px rgb(0 0 0 / 0.5);
 }
 .keys { display: flex; gap: 1.25rem; }
+.device { max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hint { display: inline-flex; align-items: center; gap: 0.45rem; color: var(--text); }
 .hints.tasoller { display: block; }
-.hints.tasoller .device { display: block; margin-bottom: 0.5rem; font-size: 0.75rem; }
+.hints.tasoller .device { display: block; max-width: 100%; margin-bottom: 0.5rem; font-size: 0.75rem; }
 .hints.tasoller .keys { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.4rem; }
 .hints.tasoller .hint {
   justify-content: center;
@@ -257,6 +281,7 @@ kbd {
   padding: 0.55rem 0.8rem;
 }
 .row .path { flex: 1; }
+.row input { min-width: 0; }
 .thumb {
   width: 4.5rem;
   aspect-ratio: 16 / 9;
@@ -280,17 +305,73 @@ kbd {
   background-size: cover;
   background-position: center;
 }
-.raw { background: rgb(255 255 255 / 0.05); padding: 1rem; border-radius: 12px; min-height: 3rem; white-space: pre-wrap; color: var(--muted); }
+.raw { background: rgb(255 255 255 / 0.05); padding: 1rem; border-radius: 12px; min-height: 3rem; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); }
 
 /* Portrait screens (9:16): one cover fills the width, neighbors just peek in. */
 @media (orientation: portrait) {
-  :root { --w: 82vw; --gap: 5vw; }
+  :root { --w: 82vw; --gap: 6vw; --gutter: clamp(1.25rem, 5vw, 4rem); }
+  .bar { padding-top: clamp(1.25rem, 3dvh, 3rem); }
+  .bar nav { padding: 0.35rem; }
+  .tab { padding: 0.65rem 1.25rem; }
+  .clock { flex-direction: column; align-items: flex-end; gap: 0.1rem; }
+  .clock .time { font-size: clamp(1.4rem, 3.8vw, 2.5rem); line-height: 1.15; }
+  .clock .date { font-size: clamp(0.75rem, 1.7vw, 1.05rem); }
+  .wallpaper:not(.custom) {
+    background:
+      radial-gradient(ellipse 100% 45% at 100% 5%, rgb(128 108 198 / 0.16), transparent),
+      radial-gradient(ellipse 110% 55% at 5% 70%, rgb(79 159 145 / 0.09), transparent),
+      radial-gradient(ellipse 110% 50% at 50% 48%, #2a2c33, var(--bg));
+  }
+  .home { gap: clamp(1.5rem, 3dvh, 3.5rem); padding-bottom: 3dvh; }
+  .library-heading { display: block; padding: 0 var(--gutter); text-align: center; }
+  .eyebrow { color: var(--muted); font-size: clamp(0.7rem, 1.7vw, 1rem); font-weight: 800; letter-spacing: 0.28em; }
+  .library-heading h1 { margin: 1rem 0 0.65rem; font-size: clamp(1.8rem, 5.7vw, 3.8rem); line-height: 1.15; letter-spacing: -0.045em; }
+  .library-heading p { color: var(--muted); margin: 0; font-size: clamp(0.85rem, 2vw, 1.2rem); }
+  .track { padding-block: 2.5rem; }
+  .card { border-radius: clamp(12px, 2vw, 24px); }
   .card.selected { transform: scale(1.04); }
+  .caption { font-size: clamp(1.6rem, 4.2vw, 3rem); line-height: 1.25; }
+  .selection-count { margin-top: 1.2rem; font-size: clamp(0.6rem, 1.35vw, 0.85rem); }
   .hints .device { display: none; }
-  .hints { justify-content: center; }
-  .settings { margin: 1rem var(--gutter) 0; padding: 0.5rem 1.25rem 1.5rem; }
+  .hints { justify-content: center; padding-top: 1.2rem; padding-bottom: clamp(1.25rem, 3dvh, 3rem); border-top: 1px solid rgb(255 255 255 / 0.07); background: rgb(16 17 22 / 0.35); }
+  .hints.tasoller .device { display: none; }
+  .hints.tasoller .keys { gap: clamp(0.4rem, 1.5vw, 1rem); }
+  .hints.tasoller .hint { padding-block: clamp(0.8rem, 2dvh, 1.6rem); }
+  .settings { height: calc(100% - 1rem); margin: 1rem var(--gutter) 0; padding: 0.5rem 1.25rem 1.5rem; }
   .row { flex-wrap: wrap; }
+  .row input:not(.path):not([type="radio"]) { flex: 1 1 10rem; }
   .row .path { flex-basis: 100%; order: 1; }
+  .wallpaper-row, .controller-choice { flex-wrap: wrap; }
+}
+
+@media (max-width: 600px) {
+  .bar { padding-inline: 1rem; }
+  .tab { padding-inline: 0.8rem; }
+  .bar-tools { gap: 0.5rem; }
+  .hints:not(.tasoller) { font-size: 0.75rem; }
+  .keys { gap: 0.75rem; }
+  .hints:not(.tasoller) .device { display: none; }
+  .settings { margin-inline: 0.75rem; padding-inline: 1rem; }
+  .dialog-overlay { padding: 1rem; }
+  .launch-dialog { padding: 1.25rem; }
+}
+
+@media (orientation: portrait) and (max-height: 740px) {
+  .home { gap: 0.6rem; padding-bottom: 0; }
+  .library-heading h1 { margin-top: 0.5rem; font-size: 1.6rem; }
+  .library-heading p { display: none; }
+  .track { padding-block: 1.25rem; }
+  .selection-count { margin-top: 0.6rem; }
+  .hints { padding-block: 0.75rem; }
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  :root { --w: min(48vw, calc((100dvh - 10rem) * 16 / 9)); }
+  .bar { padding-top: 0.5rem; }
+  .home { gap: 0.25rem; }
+  .track { padding-block: 1rem; }
+  .selection-count { display: none; }
+  .hints { padding-block: 0.5rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -340,3 +421,7 @@ kbd {
 .launch-dialog .note { font-size: 0.8rem; color: var(--muted); margin-bottom: 0; }
 .switch { display: flex; align-items: center; gap: 0.6rem; cursor: pointer; width: fit-content; }
 .switch input { width: 1.1rem; height: 1.1rem; accent-color: var(--text); }
+
+@media (max-width: 600px) {
+  .options .grid { grid-template-columns: minmax(0, 1fr); }
+}
